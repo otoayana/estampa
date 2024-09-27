@@ -3,13 +3,16 @@ mod request;
 mod response;
 mod tls;
 
-use std::{fs::File, sync::Arc};
-
 use crate::error::EstampaError;
 use request::Request;
 use response::{Response, Status};
-use rustls::server::ServerConfig;
-use std::io::BufReader;
+use rustls::{pki_types::CertificateDer, server::ServerConfig};
+use sha2::{Digest, Sha256};
+use std::{
+    fs::File,
+    io::{BufReader, Read},
+    sync::Arc,
+};
 use tokio::{io::BufStream, net::TcpListener};
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info};
@@ -54,17 +57,41 @@ async fn main() -> Result<(), EstampaError> {
         tokio::spawn(async move {
             match acceptor.accept(&mut socket).await {
                 Ok(stream) => {
-                    let certs = stream.get_ref().1.peer_certificates().is_some();
+                    let certs: Option<CertificateDer> =
+                        if let Some(val) = stream.get_ref().1.peer_certificates() {
+                            Some(val.get(0).unwrap().to_owned())
+                        } else {
+                            None
+                        };
                     let mut buf = BufStream::new(stream);
 
-                    let status = if certs {
+                    let status = if let Some(val) = certs {
+                        let mut hash = Sha256::new();
+                        let cert = val.bytes().map(|v| v.unwrap_or(0x20)).collect::<Vec<u8>>();
+                        hash.update(cert);
+
+                        let result = hash.finalize();
+                        let mut fingerprint = String::new();
+
+                        for (i, hex) in result.iter().enumerate() {
+                            if i != 0 {
+                                fingerprint.push_str(":")
+                            }
+
+                            if *hex <= 15 {
+                                fingerprint.push_str("0")
+                            }
+
+                            fingerprint.push_str(&format!("{hex:x}"));
+                        }
+
                         match Request::fetch(&mut buf).await {
                             Ok(request) => {
                                 info!("request received ({})", request);
-                                Status::MESSAGE_DELIVERED(String::from("[TODO]"))
+                                Status::MESSAGE_DELIVERED(fingerprint)
                             }
                             Err(err) => {
-                                error!(?err, "rip");
+                                error!(?err, "invalid request");
                                 Status::BAD_REQUEST
                             }
                         }
