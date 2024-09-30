@@ -2,11 +2,16 @@ use crate::error::EstampaError;
 use std::{fmt::Display, str::FromStr};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
+/*
+    Only Misfin(B) will be implemented at first. Once we have basic
+    functionality working, focus will shift to implementing Misfin(C).
+*/
+
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct Request {
     pub mailbox: String,
     pub hostname: String,
+    #[allow(dead_code)]
     pub message: String,
 }
 
@@ -36,8 +41,7 @@ impl Display for Request {
 }
 
 impl Request {
-    #[allow(dead_code)]
-    pub async fn fetch<I: AsyncBufRead + Unpin>(stream: &mut I) -> Result<Self, EstampaError> {
+    pub async fn parse<I: AsyncBufRead + Unpin>(stream: &mut I) -> Result<Self, EstampaError> {
         let mut buf = String::new();
 
         while !buf.contains("\r\n") {
