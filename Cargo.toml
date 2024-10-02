@@ -9,19 +9,21 @@ license = "AGPL-3.0-or-later"
 [dependencies]
 rustls = "0.23"
 rustls-pemfile = "2.1"
-sha2 = "0.10"
 thiserror = "1.0"
 tokio-rustls = "0.26"
+toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+x509-cert = "0.2"
+x509-verify = "0.4"
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
 
 [dependencies.tokio]
 version = "1.40"
-features = ["io-util", "macros", "net", "rt-multi-thread"]
-
-[dependencies.x509-parser]
-version = "0.16"
-features = ["verify"]
+features = ["fs", "io-util", "macros", "net", "rt-multi-thread"]
 
 [profile.release]
 strip = true

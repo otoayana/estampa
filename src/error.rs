@@ -1,5 +1,4 @@
 use thiserror::Error;
-use x509_parser::error::X509Error;
 
 #[derive(Error, Debug)]
 pub enum EstampaError {
@@ -11,6 +10,8 @@ pub enum EstampaError {
     Parse,
     #[error("tls error: {0}")]
     Tls(#[from] rustls::Error),
+    #[error("config error: {0}")]
+    Config(#[from] toml::de::Error),
     #[error("invalid signature")]
     InvalidSignature,
     #[error("no key provided")]
@@ -18,5 +19,7 @@ pub enum EstampaError {
     #[error("request too large")]
     RequestTooLarge,
     #[error("certificate error: {0}")]
-    Certificate(#[from] X509Error),
+    Certificate(#[from] x509_cert::der::Error),
+    #[error("verification error")]
+    Verification,
 }

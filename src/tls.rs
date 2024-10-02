@@ -2,31 +2,59 @@ use crate::error::EstampaError;
 use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerifier},
     pki_types::{CertificateDer, ServerName},
-    server::{
-        danger::{ClientCertVerified, ClientCertVerifier},
-        ParsedCertificate,
-    },
+    server::danger::{ClientCertVerified, ClientCertVerifier},
     ClientConfig, SignatureScheme,
 };
-use std::{io::Read, sync::Arc};
+use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tracing::info;
-use x509_parser::prelude::*;
+use x509_cert::{
+    der::{oid::AssociatedOid, Decode, Encode},
+    ext::pkix::SubjectAltName,
+    Certificate,
+};
+use x509_verify::{Signature, VerifyInfo, VerifyingKey};
 
-pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<(), EstampaError> {
-    let parsed = X509Certificate::from_der(cert).unwrap().1;
+pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<(String, String), EstampaError> {
+    let parsed = Certificate::from_der(&cert)?;
+    let tbs = parsed.tbs_certificate;
 
-    let san = if let Some(inner) = parsed.subject_alternative_name()? {
-        inner.value.general_names.iter().next()
+    let uid: String = if let Some(v) = tbs.subject.0.iter().next() {
+        v.0.iter().next().unwrap().value.decode_as()?
     } else {
-        return Err(EstampaError::Certificate(X509Error::InvalidCertificate));
+        return Err(EstampaError::Verification);
     };
 
-    let hostname = if let Some(GeneralName::DNSName(inner)) = san {
-        inner
+    let ext = if let Some(e) = tbs.extensions.clone() {
+        e
     } else {
-        return Err(EstampaError::Certificate(X509Error::InvalidCertificate));
+        return Err(EstampaError::Verification);
+    };
+
+    let hostname = {
+        let inner: String = {
+            String::from_utf8_lossy(
+                if let Some(n) = ext
+                    .iter()
+                    .filter(|x| x.extn_id == SubjectAltName::OID)
+                    .next()
+                {
+                    n
+                } else {
+                    return Err(EstampaError::Verification);
+                }
+                .extn_value
+                .clone()
+                .as_bytes(),
+            )
+            .to_string()
+            .chars()
+            .filter(|c| c.is_ascii_alphabetic() || *c == '.')
+            .collect()
+        };
+
+        inner
     };
 
     info!("sender hostname parsed ({})", hostname);
@@ -49,23 +77,24 @@ pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<(), EstampaError> {
         return Err(EstampaError::InvalidSignature);
     };
 
-    let spki = ParsedCertificate::try_from(&server_cert)?.subject_public_key_info();
+    let vinfo = VerifyInfo::new(
+        tbs.clone().to_der()?.into(),
+        Signature::new(
+            &parsed.signature_algorithm,
+            parsed.signature.as_bytes().unwrap(),
+        ),
+    );
 
-    parsed.verify_signature(Some(
-        &SubjectPublicKeyInfo::from_der(
-            spki.bytes()
-                .filter(|b| b.is_ok())
-                .map(|b| b.unwrap())
-                .collect::<Vec<u8>>()
-                .as_slice(),
-        )
-        .unwrap()
-        .1,
-    ))?;
+    let spki: VerifyingKey = Certificate::from_der(&server_cert)?
+        .tbs_certificate
+        .subject_public_key_info
+        .try_into()
+        .unwrap();
 
+    spki.verify(vinfo).map_err(|_| EstampaError::Verification)?;
     info!("sender certificate is valid");
 
-    Ok(())
+    Ok((uid.to_string(), hostname.to_string()))
 }
 
 #[derive(Debug)]
