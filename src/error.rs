@@ -9,7 +9,7 @@ pub enum EstampaError {
     #[error("failed to parse request")]
     Parse,
     #[error("tls error: {0}")]
-    Tls(#[from] rustls::Error),
+    Tls(#[from] tokio_rustls::rustls::Error),
     #[error("config error: {0}")]
     Config(#[from] toml::de::Error),
     #[error("invalid signature")]

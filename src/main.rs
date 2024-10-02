@@ -8,7 +8,6 @@ use crate::error::EstampaError;
 use config::Config;
 use request::Request;
 use response::{Response, Status};
-use rustls::{pki_types::CertificateDer, server::ServerConfig};
 use std::{
     fs::File,
     io::{self, BufReader},
@@ -16,7 +15,10 @@ use std::{
     sync::Arc,
 };
 use tokio::{io::BufStream, net::TcpListener};
-use tokio_rustls::TlsAcceptor;
+use tokio_rustls::{
+    rustls::{pki_types::CertificateDer, server::ServerConfig},
+    TlsAcceptor,
+};
 use tracing::{error, info, trace, warn};
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
