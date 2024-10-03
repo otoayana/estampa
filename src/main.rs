@@ -6,6 +6,7 @@ mod tls;
 
 use crate::error::EstampaError;
 use config::Config;
+use error::Responder;
 use request::Message;
 use response::{Response, Status};
 use std::{
@@ -31,7 +32,7 @@ async fn main() -> Result<(), EstampaError> {
         .compact()
         .with_target(false)
         .finish();
-    tracing::subscriber::set_global_default(subscriber).map_err(|_| EstampaError::Logger)?;
+    tracing::subscriber::set_global_default(subscriber)?;
 
     info!("📬 estampa v{VERSION}");
 
@@ -46,10 +47,17 @@ async fn main() -> Result<(), EstampaError> {
     let key = if let Some(key) = rustls_pemfile::private_key(&mut key_file)? {
         key
     } else {
-        return Err(EstampaError::KeyNotProvided);
+        return Err(EstampaError::Tls(
+            tokio_rustls::rustls::Error::NoCertificatesPresented,
+        ));
     };
 
-    // Connections will need a dummy verifier
+    /*
+        Client certificate verification is handled once the handshake has been
+        completed, therefore we need the trick Rustls into completing it using
+        the dummy verifier defined in tls::EstampaClientAuth
+    */
+
     let config = Arc::new(
         ServerConfig::builder()
             .with_client_cert_verifier(Arc::new(tls::EstampaClientAuth))
@@ -78,33 +86,18 @@ async fn main() -> Result<(), EstampaError> {
 
                     let (status, message): (Status, Option<Message>) = if let Some(val) = certs {
                         match Message::from(val, &mut buf).await {
-                            Ok(msg) => {
-                                dbg!(&msg);
-                                (
-                                    match msg.save(&inner_mem.mailbox, &inner_mem.base.host).await {
-                                        Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
-                                        Err(_) => Status::PERMANENT_ERROR,
-                                    },
-                                    Some(msg),
-                                )
-                            }
-                            Err(err) => (
-                                match err {
-                                    EstampaError::InvalidSignature => Status::YOURE_A_LIAR,
-                                    EstampaError::Certificate(_) => Status::PERMANENT_ERROR,
-                                    EstampaError::Verification => Status::CERTIFICATE_INVALID,
-                                    EstampaError::RequestTooLarge | EstampaError::Parse | _ => {
-                                        Status::BAD_REQUEST
-                                    }
+                            Ok(msg) => (
+                                match msg.save(&inner_mem.mailbox, &inner_mem.base.host).await {
+                                    Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
+                                    Err(err) => err.into_response(),
                                 },
-                                None,
+                                Some(msg),
                             ),
+                            Err(err) => (err.into_response(), None),
                         }
                     } else {
                         (Status::CERTIFICATE_REQUIRED, None)
                     };
-
-                    dbg!(&status);
 
                     match Response::from(status.clone()).write(&mut buf).await {
                         Ok(_) => {

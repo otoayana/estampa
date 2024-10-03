@@ -1,4 +1,5 @@
-use crate::{config::Mailbox, error::EstampaError, tls};
+use crate::error::RequestError;
+use crate::{config::Mailbox, tls};
 use std::fs::File;
 use std::io::Write;
 use std::{
@@ -31,15 +32,19 @@ pub struct Message {
 }
 
 impl FromStr for Message {
-    type Err = EstampaError;
+    type Err = RequestError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (mailbox, remainder) = s
             .strip_prefix("misfin://")
             .and_then(|s| s.split_once('@'))
-            .ok_or(EstampaError::Parse)?;
-        let (hostname, remainder) = remainder.split_once(' ').ok_or(EstampaError::Parse)?;
-        let message = remainder.strip_suffix("\r\n").ok_or(EstampaError::Parse)?;
+            .ok_or(RequestError::InvalidRequest)?;
+        let (hostname, remainder) = remainder
+            .split_once(' ')
+            .ok_or(RequestError::InvalidRequest)?;
+        let message = remainder
+            .strip_suffix("\r\n")
+            .ok_or(RequestError::InvalidRequest)?;
 
         Ok(Message {
             sender: Identity {
@@ -72,7 +77,7 @@ impl Message {
     pub async fn from<I: AsyncBufRead + Unpin>(
         cert: CertificateDer<'_>,
         stream: &mut I,
-    ) -> Result<Self, EstampaError> {
+    ) -> Result<Self, RequestError> {
         let sender = tls::verify(&cert).await?;
 
         let mut buf = String::new();
@@ -82,7 +87,7 @@ impl Message {
 
             // Misfin(B) only supports up to 2048 bytes per request
             if buf.clone().len() > 2048 {
-                return Err(EstampaError::RequestTooLarge);
+                return Err(RequestError::MaxSizeExceeded);
             }
         }
 
@@ -98,22 +103,19 @@ impl Message {
         &self,
         available_mailboxes: &HashMap<String, Mailbox>,
         hostname: &'a str,
-    ) -> Result<String, EstampaError> {
+    ) -> Result<String, RequestError> {
         let mailbox = if let Some(mbox) = available_mailboxes.get(&self.recipient.mailbox) {
             mbox
         } else {
-            // TODO(otoayana): Replace with more descriptive error
-            return Err(EstampaError::Parse);
+            return Err(RequestError::MailboxNotFound);
         };
 
         if self.recipient.hostname != hostname {
-            // TODO(otoayana): Replace with more descriptive error
-            return Err(EstampaError::Parse);
+            return Err(RequestError::DomainNotServiced);
         }
 
         if !mailbox.enabled {
-            // TODO(otoayana): Replace with more descriptive error
-            return Err(EstampaError::Parse);
+            return Err(RequestError::MailboxDisabled);
         }
 
         if !mailbox.path.exists() {
