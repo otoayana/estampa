@@ -1,0 +1,16 @@
+image: archlinux
+packages:
+  - cargo
+secrets:
+  - 3571b5f3-fc40-4faf-8ffc-32f425eaf247
+sources:
+  - https://git.sr.ht/~nixgoat/estampa
+tasks:
+  - mirror: |
+      cd estampa
+      git remote set-head origin -d
+      ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+      git push --prune git@github.com:otoayana/estampa.git '+refs/remotes/origin/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+  - build: |
+      cd estampa
+      cargo build --release
