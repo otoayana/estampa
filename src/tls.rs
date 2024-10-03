@@ -1,4 +1,4 @@
-use crate::error::EstampaError;
+use crate::{error::EstampaError, request::Identity};
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::{
@@ -18,7 +18,7 @@ use x509_cert::{
 };
 use x509_verify::{Signature, VerifyInfo, VerifyingKey};
 
-pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<(String, String), EstampaError> {
+pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<Identity, EstampaError> {
     let parsed = Certificate::from_der(&cert)?;
     let tbs = parsed.tbs_certificate;
 
@@ -96,7 +96,10 @@ pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<(String, String), E
     spki.verify(vinfo).map_err(|_| EstampaError::Verification)?;
     debug!("sender certificate is valid");
 
-    Ok((uid.to_string(), hostname.to_string()))
+    Ok(Identity {
+        mailbox: uid.to_string(),
+        hostname: hostname.to_string(),
+    })
 }
 
 #[derive(Debug)]

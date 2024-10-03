@@ -6,21 +6,20 @@ mod tls;
 
 use crate::error::EstampaError;
 use config::Config;
-use request::Request;
+use request::Message;
 use response::{Response, Status};
 use std::{
-    fs::{self, File},
-    io::{self, BufReader, Write},
+    fs::File,
+    io::{self, BufReader},
     path::PathBuf,
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{io::BufStream, net::TcpListener};
 use tokio_rustls::{
     rustls::{pki_types::CertificateDer, server::ServerConfig},
     TlsAcceptor,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -77,107 +76,45 @@ async fn main() -> Result<(), EstampaError> {
                         };
                     let mut buf = BufStream::new(stream);
 
-                    let (mut sender, mut recipient): (String, String) =
-                        ("".to_string(), "".to_string());
-
-                    // TODO(otoayana): Split off expression into its own function
-                    let status = if let Some(val) = certs {
-                        match tls::verify(&val).await {
-                            Ok(origin) => {
-                                sender = format!("{}@{}", origin.0, origin.1);
-                                match Request::parse(&mut buf).await {
-                                    Ok(request) => {
-                                        debug!("request received ({request})");
-                                        recipient =
-                                            format!("{}@{}", request.mailbox, request.hostname);
-                                        if request.hostname == inner_mem.base.host {
-                                            if let Some(mbox) =
-                                                inner_mem.mailbox.get(&request.mailbox)
-                                            {
-                                                if mbox.enabled {
-                                                    || -> Status {
-                                                        if !mbox.path.exists() {
-                                                            warn!("mailbox {} doesn't exist. making directory at requested path...", &request.mailbox);
-
-                                                            if let Err(err) =
-                                                                fs::create_dir_all(&mbox.path)
-                                                            {
-                                                                error!(
-                                                                "could not create mailbox {}! ({err})",
-                                                                &request.mailbox
-                                                            );
-                                                                return Status::PERMANENT_ERROR;
-                                                            } else {
-                                                                info!(
-                                                                "mailbox {} created successfully",
-                                                                &request.mailbox
-                                                            )
-                                                            }
-                                                        }
-
-                                                        let now = SystemTime::now();
-                                                        let time = now
-                                                            .duration_since(UNIX_EPOCH)
-                                                            .unwrap_or(Duration::new(0, 0))
-                                                            .as_millis();
-
-                                                        let mpath =
-                                                            mbox.path.clone().join(format!(
-                                                                "{}-{}@{}.gmi",
-                                                                time, origin.0, origin.1
-                                                            ));
-
-                                                        match File::create(mpath) {
-                                                            Ok(mut file) => {
-                                                                match file.write(
-                                                                    request.message.as_bytes(),
-                                                                ) {
-                                                                    Ok(_) => {
-                                                                        Status::MESSAGE_DELIVERED(
-                                                                            mbox.fingerprint
-                                                                                .clone(),
-                                                                        )
-                                                                    }
-                                                                    Err(_) => {
-                                                                        Status::PERMANENT_ERROR
-                                                                    }
-                                                                }
-                                                            }
-                                                            Err(_) => Status::PERMANENT_ERROR,
-                                                        }
-                                                    }(
-                                                    )
-                                                } else {
-                                                    Status::MAILBOX_GONE
-                                                }
-                                            } else {
-                                                Status::MAILBOX_DOESNT_EXIST
-                                            }
-                                        } else {
-                                            Status::DOMAIN_NOT_SERVICED
-                                        }
-                                    }
-                                    Err(err) => {
-                                        warn!("invalid request ({err})");
+                    let (status, message): (Status, Option<Message>) = if let Some(val) = certs {
+                        match Message::from(val, &mut buf).await {
+                            Ok(msg) => {
+                                dbg!(&msg);
+                                (
+                                    match msg.save(&inner_mem.mailbox, &inner_mem.base.host).await {
+                                        Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
+                                        Err(_) => Status::PERMANENT_ERROR,
+                                    },
+                                    Some(msg),
+                                )
+                            }
+                            Err(err) => (
+                                match err {
+                                    EstampaError::InvalidSignature => Status::YOURE_A_LIAR,
+                                    EstampaError::Certificate(_) => Status::PERMANENT_ERROR,
+                                    EstampaError::Verification => Status::CERTIFICATE_INVALID,
+                                    EstampaError::RequestTooLarge | EstampaError::Parse | _ => {
                                         Status::BAD_REQUEST
                                     }
-                                }
-                            }
-                            Err(err) => {
-                                // TODO(otoayana): handle more error scenarios
-                                error!(?err, "certificate invalid");
-                                Status::CERTIFICATE_INVALID
-                            }
+                                },
+                                None,
+                            ),
                         }
                     } else {
-                        Status::CERTIFICATE_REQUIRED
+                        (Status::CERTIFICATE_REQUIRED, None)
                     };
+
+                    dbg!(&status);
 
                     match Response::from(status.clone()).write(&mut buf).await {
                         Ok(_) => {
                             debug!("response sent ({status})");
                             if matches!(status, Status::MESSAGE_DELIVERED(_)) {
-                                info!("message received ({} -> {})", sender, recipient);
+                                let u_message = message.unwrap();
+                                info!(
+                                    "message received ({} -> {})",
+                                    u_message.sender, u_message.recipient
+                                );
                             }
                         }
                         Err(msg) => error!("response failed ({msg})"),

@@ -1,6 +1,16 @@
-use crate::error::EstampaError;
-use std::{fmt::Display, str::FromStr};
+use crate::{config::Mailbox, error::EstampaError, tls};
+use std::fs::File;
+use std::io::Write;
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    fs,
+    str::FromStr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
+use tokio_rustls::rustls::pki_types::CertificateDer;
+use tracing::{debug, info, warn};
 
 /*
     Only Misfin(B) will be implemented at first. Once we have basic
@@ -8,14 +18,19 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 */
 
 #[derive(Debug)]
-pub struct Request {
+pub struct Identity {
     pub mailbox: String,
     pub hostname: String,
-    #[allow(dead_code)]
+}
+
+#[derive(Debug)]
+pub struct Message {
+    pub sender: Identity,
+    pub recipient: Identity,
     pub message: String,
 }
 
-impl FromStr for Request {
+impl FromStr for Message {
     type Err = EstampaError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -26,34 +41,105 @@ impl FromStr for Request {
         let (hostname, remainder) = remainder.split_once(' ').ok_or(EstampaError::Parse)?;
         let message = remainder.strip_suffix("\r\n").ok_or(EstampaError::Parse)?;
 
-        Ok(Request {
-            mailbox: mailbox.to_string(),
-            hostname: hostname.to_string(),
+        Ok(Message {
+            sender: Identity {
+                hostname: String::new(),
+                mailbox: String::new(),
+            },
+            recipient: Identity {
+                mailbox: mailbox.to_string(),
+                hostname: hostname.to_string(),
+            },
             message: message.to_string(),
         })
     }
 }
 
-impl Display for Request {
+impl Display for Identity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}@{}", self.mailbox, self.hostname)
     }
 }
 
-impl Request {
-    pub async fn parse<I: AsyncBufRead + Unpin>(stream: &mut I) -> Result<Self, EstampaError> {
+impl Display for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} -> {}", self.sender, self.recipient)
+    }
+}
+
+impl Message {
+    /// Issue a new Request object from a sender certificate and a Tokio stream
+    pub async fn from<I: AsyncBufRead + Unpin>(
+        cert: CertificateDer<'_>,
+        stream: &mut I,
+    ) -> Result<Self, EstampaError> {
+        let sender = tls::verify(&cert).await?;
+
         let mut buf = String::new();
 
         while !buf.contains("\r\n") {
             stream.read_line(&mut buf).await?;
 
+            // Misfin(B) only supports up to 2048 bytes per request
             if buf.clone().len() > 2048 {
                 return Err(EstampaError::RequestTooLarge);
             }
         }
 
-        let request = buf.parse::<Request>()?;
+        let mut request = buf.parse::<Message>()?;
+        request.sender = sender;
 
+        debug!("request received ({request})");
         Ok(request)
+    }
+
+    /// Stores the message created in the request to the filesystem
+    pub async fn save<'a>(
+        &self,
+        available_mailboxes: &HashMap<String, Mailbox>,
+        hostname: &'a str,
+    ) -> Result<String, EstampaError> {
+        let mailbox = if let Some(mbox) = available_mailboxes.get(&self.recipient.mailbox) {
+            mbox
+        } else {
+            // TODO(otoayana): Replace with more descriptive error
+            return Err(EstampaError::Parse);
+        };
+
+        if self.recipient.hostname != hostname {
+            // TODO(otoayana): Replace with more descriptive error
+            return Err(EstampaError::Parse);
+        }
+
+        if !mailbox.enabled {
+            // TODO(otoayana): Replace with more descriptive error
+            return Err(EstampaError::Parse);
+        }
+
+        if !mailbox.path.exists() {
+            warn!(
+                "mailbox {} doesn't exist. making directory at requested path...",
+                self.recipient.mailbox
+            );
+
+            fs::create_dir_all(&mailbox.path)?;
+            info!("mailbox {} created successfully", self.recipient.mailbox)
+        }
+
+        let now = SystemTime::now();
+        let time = now
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::new(0, 0))
+            .as_millis();
+
+        let path = mailbox
+            .path
+            .clone()
+            .join(format!("{}-{}.gmi", time, self.sender));
+
+        let mut file = File::create(path)?;
+        file.write(self.message.as_bytes())?;
+
+        Ok(mailbox.fingerprint.clone())
     }
 }
