@@ -10,7 +10,7 @@ use tokio_rustls::{
     },
     TlsConnector,
 };
-use tracing::info;
+use tracing::debug;
 use x509_cert::{
     der::{oid::AssociatedOid, Decode, Encode},
     ext::pkix::SubjectAltName,
@@ -59,7 +59,7 @@ pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<(String, String), E
         inner
     };
 
-    info!("sender hostname parsed ({})", hostname);
+    debug!("sender hostname parsed ({})", hostname);
 
     let address = format!("{}:1958", hostname);
     let config = ClientConfig::builder()
@@ -94,7 +94,7 @@ pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<(String, String), E
         .unwrap();
 
     spki.verify(vinfo).map_err(|_| EstampaError::Verification)?;
-    info!("sender certificate is valid");
+    debug!("sender certificate is valid");
 
     Ok((uid.to_string(), hostname.to_string()))
 }

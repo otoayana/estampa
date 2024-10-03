@@ -20,6 +20,7 @@ pub struct Base {
 pub struct Tls {
     pub certificate: PathBuf,
     pub private_key: PathBuf,
+    #[allow(dead_code)]
     pub trust_dir: PathBuf,
 }
 
