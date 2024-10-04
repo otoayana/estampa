@@ -2,6 +2,7 @@ use crate::error::RequestError;
 use crate::{config::Mailbox, tls};
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
 use std::{
     collections::HashMap,
     fmt::Display,
@@ -75,10 +76,11 @@ impl Display for Message {
 impl Message {
     /// Issue a new Request object from a sender certificate and a Tokio stream
     pub async fn from<I: AsyncBufRead + Unpin>(
+        trust_store: PathBuf,
         cert: CertificateDer<'_>,
         stream: &mut I,
     ) -> Result<Self, RequestError> {
-        let sender = tls::verify(&cert).await?;
+        let sender = tls::verify(&cert, trust_store).await?;
 
         let mut buf = String::new();
 

@@ -20,7 +20,7 @@ use tokio_rustls::{
     rustls::{pki_types::CertificateDer, server::ServerConfig},
     TlsAcceptor,
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, Level};
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -30,6 +30,7 @@ async fn main() -> Result<(), EstampaError> {
 
     let subscriber = tracing_subscriber::fmt()
         .compact()
+        .with_max_level(Level::DEBUG)
         .with_target(false)
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
@@ -85,7 +86,7 @@ async fn main() -> Result<(), EstampaError> {
                     let mut buf = BufStream::new(stream);
 
                     let (status, message): (Status, Option<Message>) = if let Some(val) = certs {
-                        match Message::from(val, &mut buf).await {
+                        match Message::from(inner_mem.tls.trust_dir.clone(), val, &mut buf).await {
                             Ok(msg) => (
                                 match msg.save(&inner_mem.mailbox, &inner_mem.base.host).await {
                                     Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),

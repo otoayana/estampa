@@ -1,6 +1,10 @@
 use crate::{error::VerificationError, request::Identity};
-use std::sync::Arc;
-use tokio::net::TcpStream;
+use std::{path::PathBuf, sync::Arc};
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 use tokio_rustls::{
     rustls::{
         self,
@@ -13,14 +17,17 @@ use tokio_rustls::{
 };
 use tracing::debug;
 use x509_cert::{
-    der::{oid::AssociatedOid, Decode, Encode},
+    der::{asn1::BitString, oid::AssociatedOid, Decode, Encode},
     ext::pkix::SubjectAltName,
     Certificate,
 };
 use x509_verify::{Signature, VerifyInfo, VerifyingKey};
 
 /// Parse a client certificate and validate its origin
-pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<Identity, VerificationError> {
+pub async fn verify<'a>(
+    cert: &CertificateDer<'a>,
+    trust_path: PathBuf,
+) -> Result<Identity, VerificationError> {
     let parsed = Certificate::from_der(&cert)?;
     let tbs = parsed.tbs_certificate;
 
@@ -64,26 +71,60 @@ pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<Identity, Verificat
 
     debug!("sender hostname parsed ({})", hostname);
 
-    // Fetch and verify the certificate from the client's SAN
-    let address = format!("{}:1958", hostname);
+    let local_cert_path = trust_path.join(format!("{}.spki", hostname));
 
-    let config = ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(EstampaServerAuth))
-        .with_no_client_auth();
-    let connector = TlsConnector::from(Arc::new(config));
+    let spki: VerifyingKey = if local_cert_path.exists() {
+        let mut raw: Vec<u8> = vec![];
 
-    let raw_stream = TcpStream::connect(address).await?;
+        File::open(&local_cert_path)
+            .await?
+            .read_to_end(&mut raw)
+            .await?;
 
-    let tls_hostname = ServerName::try_from(hostname.to_string())
-        .map_err(|_| VerificationError::InvalidHostname)?;
-    let stream = connector.connect(tls_hostname, raw_stream).await?;
+        let out: x509_cert::spki::SubjectPublicKeyInfo<x509_cert::der::Any, BitString> =
+            x509_cert::spki::SubjectPublicKeyInfo::try_from(raw.as_slice())
+                .map_err(|_| VerificationError::InvalidSignature)?;
 
-    let server_cert = if let Some(c) = stream.get_ref().1.peer_certificates() {
-        c.first().unwrap().to_owned()
+        out
     } else {
-        return Err(VerificationError::InvalidSignature);
-    };
+        // Fetch and verify the certificate from the client's SAN
+        let address = format!("{}:1958", hostname);
+
+        let config = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(EstampaServerAuth))
+            .with_no_client_auth();
+        let connector = TlsConnector::from(Arc::new(config));
+
+        let raw_stream = TcpStream::connect(address).await?;
+
+        let tls_hostname = ServerName::try_from(hostname.to_string())
+            .map_err(|_| VerificationError::InvalidHostname)?;
+        let stream = connector.connect(tls_hostname, raw_stream).await?;
+
+        let server_cert = if let Some(c) = stream.get_ref().1.peer_certificates() {
+            c.first().unwrap().to_owned()
+        } else {
+            return Err(VerificationError::InvalidSignature);
+        };
+
+        let out = Certificate::from_der(&server_cert)?
+            .tbs_certificate
+            .subject_public_key_info;
+        let mut buf: Vec<u8> = vec![];
+
+        out.clone().encode_to_vec(&mut buf)?;
+
+        // Cache the SPKI for later usage
+        File::create(&local_cert_path)
+            .await?
+            .write_all(&buf)
+            .await?;
+
+        out
+    }
+    .try_into()
+    .map_err(|_| VerificationError::InvalidSignature)?;
 
     let verification_info = VerifyInfo::new(
         tbs.clone().to_der()?.into(),
@@ -92,12 +133,6 @@ pub async fn verify<'a>(cert: &CertificateDer<'a>) -> Result<Identity, Verificat
             parsed.signature.as_bytes().unwrap(),
         ),
     );
-
-    let spki: VerifyingKey = Certificate::from_der(&server_cert)?
-        .tbs_certificate
-        .subject_public_key_info
-        .try_into()
-        .map_err(|_| VerificationError::InvalidSignature)?;
 
     spki.verify(verification_info)
         .map_err(|_| VerificationError::InvalidSignature)?;
