@@ -38,27 +38,22 @@ pub async fn verify<'a>(
     };
 
     // SANs need to be fetched through the certificates' extensions
-    let extensions = if let Some(e) = tbs.extensions.clone() {
-        e
-    } else {
-        return Err(VerificationError::InvalidCertificate);
-    };
+    let extensions = tbs
+        .clone()
+        .extensions
+        .ok_or(VerificationError::InvalidCertificate)?;
 
     let hostname = {
         let inner: String = {
             String::from_utf8_lossy(
-                if let Some(n) = extensions
+                extensions
                     .iter()
                     .filter(|x| x.extn_id == SubjectAltName::OID)
                     .next()
-                {
-                    n
-                } else {
-                    return Err(VerificationError::InvalidCertificate);
-                }
-                .extn_value
-                .clone()
-                .as_bytes(),
+                    .ok_or(VerificationError::InvalidCertificate)?
+                    .extn_value
+                    .clone()
+                    .as_bytes(),
             )
             .to_string()
             .chars()
@@ -102,11 +97,14 @@ pub async fn verify<'a>(
             .map_err(|_| VerificationError::InvalidHostname)?;
         let stream = connector.connect(tls_hostname, raw_stream).await?;
 
-        let server_cert = if let Some(c) = stream.get_ref().1.peer_certificates() {
-            c.first().unwrap().to_owned()
-        } else {
-            return Err(VerificationError::InvalidSignature);
-        };
+        let server_cert = stream
+            .get_ref()
+            .1
+            .peer_certificates()
+            .ok_or(VerificationError::InvalidSignature)?
+            .first()
+            .unwrap()
+            .to_owned();
 
         let out = Certificate::from_der(&server_cert)?
             .tbs_certificate

@@ -45,13 +45,9 @@ async fn main() -> Result<(), EstampaError> {
 
     let certs = rustls_pemfile::certs(&mut certs_file)
         .collect::<Result<Vec<CertificateDer>, io::Error>>()?;
-    let key = if let Some(key) = rustls_pemfile::private_key(&mut key_file)? {
-        key
-    } else {
-        return Err(EstampaError::Tls(
-            tokio_rustls::rustls::Error::NoCertificatesPresented,
-        ));
-    };
+    let key = rustls_pemfile::private_key(&mut key_file)?.ok_or(EstampaError::Tls(
+        tokio_rustls::rustls::Error::NoCertificatesPresented,
+    ))?;
 
     /*
         Client certificate verification is handled once the handshake has been

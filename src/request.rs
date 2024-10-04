@@ -106,11 +106,9 @@ impl Message {
         available_mailboxes: &HashMap<String, Mailbox>,
         hostname: &'a str,
     ) -> Result<String, RequestError> {
-        let mailbox = if let Some(mbox) = available_mailboxes.get(&self.recipient.mailbox) {
-            mbox
-        } else {
-            return Err(RequestError::MailboxNotFound);
-        };
+        let mailbox = available_mailboxes
+            .get(&self.recipient.mailbox)
+            .ok_or(RequestError::MailboxNotFound)?;
 
         if self.recipient.hostname != hostname {
             return Err(RequestError::DomainNotServiced);
