@@ -1,5 +1,5 @@
 use crate::{error::VerificationError, request::Identity};
-use std::{path::PathBuf, sync::Arc};
+use std::{fs, path::PathBuf, sync::Arc};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -15,7 +15,7 @@ use tokio_rustls::{
     },
     TlsConnector,
 };
-use tracing::debug;
+use tracing::{debug, warn};
 use x509_cert::{
     der::{asn1::BitString, oid::AssociatedOid, Decode, Encode},
     ext::pkix::SubjectAltName,
@@ -65,6 +65,11 @@ pub async fn verify<'a>(
     };
 
     debug!("sender hostname parsed ({})", hostname);
+
+    if !trust_path.exists() {
+        warn!("trust path doesn't exist! creating...");
+        fs::create_dir_all(&trust_path)?;
+    }
 
     let local_cert_path = trust_path.join(format!("{}.spki", hostname));
 
