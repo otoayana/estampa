@@ -7,11 +7,12 @@ mod tls;
 use crate::error::EstampaError;
 use config::Config;
 use error::Responder;
+use rcgen::generate_simple_self_signed;
 use request::Message;
 use response::{Response, Status};
 use std::{
     fs::File,
-    io::{self, BufReader},
+    io::{self, BufReader, Write},
     path::PathBuf,
     sync::Arc,
 };
@@ -20,7 +21,7 @@ use tokio_rustls::{
     rustls::{pki_types::CertificateDer, server::ServerConfig},
     TlsAcceptor,
 };
-use tracing::{debug, error, info, Level};
+use tracing::{debug, error, info, warn, Level};
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -36,6 +37,23 @@ async fn main() -> Result<(), EstampaError> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     info!("📬 estampa v{VERSION}");
+
+    // Create server certificates if they don't exist
+    if !conf.tls.certificate.exists() && !conf.tls.private_key.exists() {
+        warn!("certificate and key not found. generating...");
+        let cert = generate_simple_self_signed(vec![conf.base.host.clone()])?;
+
+        File::create(&conf.tls.certificate)?.write(&cert.cert.pem().into_bytes())?;
+        File::create(&conf.tls.private_key)?.write(&cert.key_pair.serialize_pem().into_bytes())?;
+
+        info!("succesfully generated key for host {}", &conf.base.host);
+    }
+
+    if conf.tls.certificate.exists() ^ conf.tls.private_key.exists() {
+        error!("incomplete x509 chain");
+
+        return Err(EstampaError::IncompleteX509Chain);
+    }
 
     let addr = &conf.base.bind;
     let listen = TcpListener::bind(&addr).await?;

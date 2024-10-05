@@ -7,12 +7,16 @@ pub trait Responder {
 
 #[derive(Error, Debug)]
 pub enum EstampaError {
+    #[error("incomplete x509 chain")]
+    IncompleteX509Chain,
     #[error("io error: {0}")]
     IO(#[from] std::io::Error),
     #[error("failed to set up logger")]
     Logger(#[from] tracing::subscriber::SetGlobalDefaultError),
     #[error("tls error: {0}")]
     Tls(#[from] tokio_rustls::rustls::Error),
+    #[error("certificate generation error: {0}")]
+    CertificateGen(#[from] rcgen::Error),
     #[error("config error: {0}")]
     Config(#[from] toml::de::Error),
     #[error("request error: {0}")]
