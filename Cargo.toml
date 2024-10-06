@@ -8,6 +8,7 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 rustls-pemfile = "2.1"
+sha2 = "0.10"
 thiserror = "1.0"
 tokio-rustls = "0.26"
 toml = "0.8"
@@ -28,7 +29,7 @@ features = ["fs", "io-util", "macros", "net", "rt-multi-thread"]
 
 [dependencies.x509-cert]
 version = "0.2"
-features = ["std"]
+features = ["std", "pem"]
 default-features = false
 
 [dependencies.x509-verify]

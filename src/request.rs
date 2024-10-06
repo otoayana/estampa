@@ -1,7 +1,8 @@
 use crate::error::RequestError;
 use crate::{config::Mailbox, tls};
+use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::{
     collections::HashMap,
@@ -13,6 +14,8 @@ use std::{
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use tracing::{debug, info, warn};
+use x509_cert::der::{Encode, Length};
+use x509_cert::Certificate;
 
 /*
     Only Misfin(B) will be implemented at first. Once we have basic
@@ -142,6 +145,44 @@ impl Message {
         let mut file = File::create(path)?;
         file.write(self.message.as_bytes())?;
 
-        Ok(mailbox.fingerprint.clone())
+        // Certificate is read to respond with a fingerprint
+        let mut cert_file = File::open(&mailbox.certificate)?;
+        let mut cert_buf: Vec<u8> = vec![];
+        debug!(
+            "opening certificate for mailbox {} at {:?}",
+            &self.recipient.mailbox, &mailbox.certificate
+        );
+
+        cert_file.read_to_end(&mut cert_buf)?;
+
+        let mut hasher = Sha256::new();
+        let pemchain = Certificate::load_pem_chain(&cert_buf)
+            .map_err(|e| RequestError::Verification(crate::error::VerificationError::X509(e)))?;
+
+        hasher.update(
+            pemchain
+                .first()
+                // This unwrap might be a little overcomplicated, but does the trick :^)
+                .ok_or(RequestError::Verification(
+                    crate::error::VerificationError::X509(x509_cert::der::Error::new(
+                        x509_cert::der::ErrorKind::FileNotFound,
+                        Length::new(0),
+                    )),
+                ))?
+                .to_der()
+                .map_err(|e| RequestError::Verification(crate::error::VerificationError::X509(e)))?
+                .to_vec(),
+        );
+
+        let fingerprint = hasher.finalize();
+        let mut fp_fmt = String::new();
+
+        for oct in fingerprint {
+            fp_fmt.push_str(format!("{:x}", oct).as_str())
+        }
+
+        debug!("fingerprint is {:?}", &fingerprint);
+
+        Ok(fp_fmt)
     }
 }

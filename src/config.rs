@@ -27,9 +27,8 @@ pub struct Tls {
 #[derive(Debug, Deserialize)]
 pub struct Mailbox {
     pub enabled: bool,
-    pub certificate: PathBuf,
-    pub fingerprint: String,
     pub path: PathBuf,
+    pub certificate: PathBuf,
 }
 
 impl Config {
