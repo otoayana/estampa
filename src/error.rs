@@ -59,12 +59,12 @@ pub enum VerificationError {
 impl Responder for RequestError {
     fn into_response(&self) -> Status {
         match self {
-            RequestError::MailboxNotFound => Status::MAILBOX_DOESNT_EXIST,
-            RequestError::DomainNotServiced => Status::DOMAIN_NOT_SERVICED,
-            RequestError::MailboxDisabled => Status::MAILBOX_GONE,
-            RequestError::MaxSizeExceeded | RequestError::InvalidRequest => Status::BAD_REQUEST,
-            RequestError::IO(_) => Status::PERMANENT_ERROR,
-            RequestError::Verification(inner) => inner.into_response(),
+            Self::MailboxNotFound => Status::MAILBOX_DOESNT_EXIST,
+            Self::DomainNotServiced => Status::DOMAIN_NOT_SERVICED,
+            Self::MailboxDisabled => Status::MAILBOX_GONE,
+            Self::MaxSizeExceeded | Self::InvalidRequest => Status::BAD_REQUEST,
+            Self::IO(_) => Status::PERMANENT_ERROR,
+            Self::Verification(inner) => inner.into_response(),
         }
     }
 }
@@ -72,11 +72,9 @@ impl Responder for RequestError {
 impl Responder for VerificationError {
     fn into_response(&self) -> Status {
         match self {
-            VerificationError::InvalidSignature => Status::UNAUTHORIZED_SENDER,
-            VerificationError::InvalidCertificate => Status::CERTIFICATE_INVALID,
-            VerificationError::InvalidHostname => Status::YOURE_A_LIAR,
-            VerificationError::IO(_) => Status::PERMANENT_ERROR,
-            VerificationError::X509(_) => Status::PERMANENT_ERROR,
+            Self::InvalidCertificate => Status::CERTIFICATE_INVALID,
+            Self::InvalidSignature | Self::InvalidHostname => Status::YOURE_A_LIAR,
+            _ => Status::PERMANENT_ERROR,
         }
     }
 }
