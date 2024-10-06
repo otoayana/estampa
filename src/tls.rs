@@ -1,5 +1,9 @@
 use crate::{error::VerificationError, request::Identity};
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{Arc, LazyLock},
+};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -19,9 +23,14 @@ use tracing::{debug, warn};
 use x509_cert::{
     der::{asn1::BitString, oid::AssociatedOid, Decode, Encode},
     ext::pkix::SubjectAltName,
+    spki::ObjectIdentifier,
     Certificate,
 };
 use x509_verify::{Signature, VerifyInfo, VerifyingKey};
+
+static UID_OID_X509: LazyLock<ObjectIdentifier> = LazyLock::new(|| {
+    ObjectIdentifier::from_arcs(crate::UID_OID.clone().iter().map(|v| *v as u32)).unwrap()
+});
 
 /// Parse a client certificate and validate its origin
 pub async fn verify<'a>(
@@ -31,11 +40,23 @@ pub async fn verify<'a>(
     let parsed = Certificate::from_der(&cert)?;
     let tbs = parsed.tbs_certificate;
 
-    let uid: String = if let Some(v) = tbs.subject.0.iter().next() {
-        v.0.iter().next().unwrap().value.decode_as()?
-    } else {
-        return Err(VerificationError::InvalidCertificate);
-    };
+    let uid: String = tbs
+        .subject
+        .0
+        .iter()
+        .filter(|v| {
+            v.0.iter()
+                .filter(|n| n.oid == *UID_OID_X509)
+                .next()
+                .is_some()
+        })
+        .map(|v| v.0.iter().next().clone())
+        .filter(|v| v.is_some())
+        .map(|v| v.unwrap())
+        .next()
+        .ok_or(VerificationError::InvalidCertificate)?
+        .value
+        .decode_as()?;
 
     // SANs need to be fetched through the certificates' extensions
     let extensions = tbs

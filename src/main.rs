@@ -23,7 +23,7 @@ use tokio_rustls::{
 };
 use tracing::{debug, error, info, warn};
 
-const UID_OID: [u64; 7] = [0, 9, 2342, 19200300, 100, 1, 1];
+pub const UID_OID: [u64; 7] = [0, 9, 2342, 19200300, 100, 1, 1];
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]
@@ -69,6 +69,7 @@ async fn main() -> Result<(), EstampaError> {
         EstampaError::Tls(tokio_rustls::rustls::Error::NoCertificatesPresented),
     )?;
 
+    // Create client certificates for each mailbox if not present
     for mbox in &conf.mailbox {
         if !mbox.1.certificate.exists() {
             warn!(
