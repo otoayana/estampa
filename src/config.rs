@@ -20,13 +20,13 @@ pub struct Base {
 pub struct Tls {
     pub certificate: PathBuf,
     pub private_key: PathBuf,
-    #[allow(dead_code)]
     pub trust_dir: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Mailbox {
     pub enabled: bool,
+    pub name: String,
     pub path: PathBuf,
     pub certificate: PathBuf,
 }

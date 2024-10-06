@@ -92,8 +92,8 @@ async fn main() -> Result<(), EstampaError> {
             let mut params = CertificateParams::new(vec![conf.base.host.clone()])?;
             let mut dn = DistinguishedName::new();
 
-            dn.push(DnType::CommonName, mbox.0.clone());
             dn.push(DnType::CustomDnType(UID_OID.to_vec()), mbox.0.clone());
+            dn.push(DnType::CommonName, mbox.1.name.clone());
 
             params.distinguished_name = dn;
 
