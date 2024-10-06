@@ -19,6 +19,8 @@ pub enum EstampaError {
     CertificateGen(#[from] rcgen::Error),
     #[error("config error: {0}")]
     Config(#[from] toml::de::Error),
+    #[error("time error: {0}")]
+    Time(#[from] time::error::ComponentRange),
     #[error("request error: {0}")]
     Request(#[from] RequestError),
 }

@@ -16,6 +16,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
+use time::OffsetDateTime;
 use tokio::{io::BufStream, net::TcpListener};
 use tokio_rustls::{
     rustls::{pki_types::CertificateDer, server::ServerConfig},
@@ -43,7 +44,12 @@ async fn main() -> Result<(), EstampaError> {
         warn!("certificate and key not found. generating...");
 
         let keypair = KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256)?;
-        let cert = CertificateParams::new(vec![conf.base.host.clone()])?.self_signed(&keypair)?;
+        let mut cert_params = CertificateParams::new(vec![conf.base.host.clone()])?;
+        let now = OffsetDateTime::now_utc();
+
+        cert_params.not_after = now.replace_year(now.year() + 10)?;
+
+        let cert = cert_params.self_signed(&keypair)?;
 
         File::create(&conf.tls.certificate)?.write(&cert.pem().into_bytes())?;
         File::create(&conf.tls.private_key)?.write(&keypair.serialize_pem().into_bytes())?;
@@ -97,6 +103,9 @@ async fn main() -> Result<(), EstampaError> {
             dn.push(DnType::CommonName, mbox.1.name.clone());
 
             params.distinguished_name = dn;
+
+            let now = OffsetDateTime::now_utc();
+            params.not_after = now.replace_year(now.year() + 5)?;
 
             let key = KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256)?;
             let cert = params.signed_by(&key, &parent_cert, &root_sig)?;
