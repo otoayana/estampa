@@ -14,21 +14,19 @@ pub struct Config {
 pub struct Base {
     pub bind: String,
     pub host: String,
+    pub store: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Tls {
     pub certificate: PathBuf,
     pub private_key: PathBuf,
-    pub trust_dir: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Mailbox {
     pub enabled: bool,
     pub name: String,
-    pub path: PathBuf,
-    pub certificate: PathBuf,
 }
 
 impl Config {

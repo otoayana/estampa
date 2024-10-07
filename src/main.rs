@@ -71,13 +71,20 @@ async fn main() -> Result<(), EstampaError> {
 
     // Create client certificates for each mailbox if not present
     for mbox in &conf.mailbox {
-        if !mbox.1.certificate.exists() {
+        if conf
+            .base
+            .store
+            .join(format!("certs/{}", mbox.0))
+            .exists()
+            .clone()
+        {
             warn!(
                 "ceritificate not found for mailbox {}. generating...",
                 mbox.0
             );
 
             Cert::generate_client(
+                &conf.base.store,
                 mbox,
                 &conf.base.host,
                 &conf.tls.certificate,
@@ -125,9 +132,18 @@ async fn main() -> Result<(), EstampaError> {
                     let mut buf = BufStream::new(stream);
 
                     let (status, message): (Status, Option<Message>) = if let Some(val) = certs {
-                        match Message::from(inner_mem.tls.trust_dir.clone(), val, &mut buf).await {
+                        match Message::from(inner_mem.base.store.join("trust/"), val, &mut buf)
+                            .await
+                        {
                             Ok(msg) => (
-                                match msg.save(&inner_mem.mailbox, &inner_mem.base.host).await {
+                                match msg
+                                    .save(
+                                        &inner_mem.base.store,
+                                        &inner_mem.mailbox,
+                                        &inner_mem.base.host,
+                                    )
+                                    .await
+                                {
                                     Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
                                     Err(err) => err.into_response(),
                                 },

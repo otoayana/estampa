@@ -70,6 +70,7 @@ impl Cert {
 
     /// Generate a client certificate
     pub async fn generate_client<'a>(
+        store: &PathBuf,
         mailbox: (&String, &Mailbox),
         host: &'a str,
         host_certificate: &PathBuf,
@@ -104,30 +105,13 @@ impl Cert {
         let key = KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256)?;
         let cert = params.signed_by(&key, &parent_cert, &root_sig)?;
 
-        File::create(&mailbox.1.certificate)
+        File::create(&store.join(format!("certs/{}.pem", &mailbox.0)))
             .await?
             .write_all(&cert.pem().into_bytes())
             .await?;
         File::create(
             // TODO(otoayana): Clean this up, maybe by adding a new error item
-            &mailbox
-                .1
-                .certificate
-                .parent()
-                .unwrap()
-                .to_path_buf()
-                .join(format!(
-                    "{}.key",
-                    &mailbox
-                        .1
-                        .certificate
-                        .file_name()
-                        .unwrap()
-                        .to_string_lossy()
-                        .split_once(".")
-                        .unwrap()
-                        .0,
-                )),
+            &store.join(format!("certs/priv/{}.pem", &mailbox.0)),
         )
         .await?
         .write_all(&key.serialize_pem().into_bytes())

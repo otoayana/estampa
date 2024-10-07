@@ -107,6 +107,7 @@ impl Message {
     /// Stores the message created in the request to the filesystem
     pub async fn save<'a>(
         &self,
+        store: &PathBuf,
         available_mailboxes: &HashMap<String, Mailbox>,
         hostname: &'a str,
     ) -> Result<String, RequestError> {
@@ -122,13 +123,17 @@ impl Message {
             return Err(RequestError::MailboxDisabled);
         }
 
-        if !mailbox.path.exists() {
+        if !store
+            .clone()
+            .join(format!("mbox/{}", self.recipient.mailbox).as_str())
+            .exists()
+        {
             warn!(
                 "mailbox {} doesn't exist. making directory at requested path...",
                 self.recipient.mailbox
             );
 
-            fs::create_dir_all(&mailbox.path)?;
+            fs::create_dir_all(format!("mbox/{}", self.recipient.mailbox).as_str())?;
             info!("mailbox {} created successfully", self.recipient.mailbox)
         }
 
@@ -138,20 +143,24 @@ impl Message {
             .unwrap_or(Duration::new(0, 0))
             .as_millis();
 
-        let path = mailbox
-            .path
-            .clone()
-            .join(format!("{}-{}.gmi", time, self.sender));
+        let path = store.clone().join(format!(
+            "mbox/{}/{}-{}.gmi",
+            self.recipient.mailbox, time, self.sender
+        ));
 
         let mut file = File::create(path)?;
         file.write(self.message.as_bytes())?;
 
         // Certificate is read to respond with a fingerprint
-        let mut cert_file = File::open(&mailbox.certificate)?;
+        let mut cert_file = File::open(
+            store
+                .clone()
+                .join(format!("certs/{}.pem", self.recipient.mailbox)),
+        )?;
         let mut cert_buf: Vec<u8> = vec![];
         debug!(
-            "opening certificate for mailbox {} at {:?}",
-            &self.recipient.mailbox, &mailbox.certificate
+            "opening certificate for mailbox {}",
+            &self.recipient.mailbox
         );
 
         cert_file.read_to_end(&mut cert_buf)?;
