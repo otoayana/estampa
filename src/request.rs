@@ -8,13 +8,12 @@ use std::path::PathBuf;
 use std::{
     collections::HashMap,
     fmt::Display,
-    fs,
     str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use tokio_rustls::rustls::pki_types::CertificateDer;
-use tracing::{debug, info, warn};
+use tracing::debug;
 use x509_cert::der::{Encode, Length};
 use x509_cert::Certificate;
 
@@ -121,20 +120,6 @@ impl Message {
 
         if !mailbox.enabled {
             return Err(RequestError::MailboxDisabled);
-        }
-
-        if !store
-            .clone()
-            .join(format!("mbox/{}", self.recipient.mailbox).as_str())
-            .exists()
-        {
-            warn!(
-                "mailbox {} doesn't exist. making directory at requested path...",
-                self.recipient.mailbox
-            );
-
-            fs::create_dir_all(format!("mbox/{}", self.recipient.mailbox).as_str())?;
-            info!("mailbox {} created successfully", self.recipient.mailbox)
         }
 
         let now = SystemTime::now();

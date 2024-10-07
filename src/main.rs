@@ -37,6 +37,8 @@ async fn main() -> Result<(), EstampaError> {
 
     info!("📬 estampa v{VERSION}");
 
+    conf.init().await?;
+
     // Create server certificates if they don't exist
     if !conf.tls.certificate.exists() && !conf.tls.private_key.exists() {
         warn!("certificate and key not found. generating...");
