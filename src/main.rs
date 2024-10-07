@@ -7,16 +7,15 @@ mod tls;
 use crate::error::EstampaError;
 use config::Config;
 use error::Responder;
-use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use request::Message;
 use response::{Response, Status};
 use std::{
     fs::File,
-    io::{self, BufReader, Read, Write},
+    io::{self, BufReader},
     path::PathBuf,
     sync::Arc,
 };
-use time::OffsetDateTime;
+use tls::Cert;
 use tokio::{io::BufStream, net::TcpListener};
 use tokio_rustls::{
     rustls::{pki_types::CertificateDer, server::ServerConfig},
@@ -24,7 +23,6 @@ use tokio_rustls::{
 };
 use tracing::{debug, error, info, warn};
 
-pub const UID_OID: [u64; 7] = [0, 9, 2342, 19200300, 100, 1, 1];
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]
@@ -43,16 +41,12 @@ async fn main() -> Result<(), EstampaError> {
     if !conf.tls.certificate.exists() && !conf.tls.private_key.exists() {
         warn!("certificate and key not found. generating...");
 
-        let keypair = KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256)?;
-        let mut cert_params = CertificateParams::new(vec![conf.base.host.clone()])?;
-        let now = OffsetDateTime::now_utc();
-
-        cert_params.not_after = now.replace_year(now.year() + 10)?;
-
-        let cert = cert_params.self_signed(&keypair)?;
-
-        File::create(&conf.tls.certificate)?.write(&cert.pem().into_bytes())?;
-        File::create(&conf.tls.private_key)?.write(&keypair.serialize_pem().into_bytes())?;
+        Cert::generate_server(
+            &conf.base.host,
+            &conf.tls.certificate,
+            &conf.tls.private_key,
+        )
+        .await?;
 
         info!("succesfully generated key for host {}", &conf.base.host);
     }
@@ -83,56 +77,13 @@ async fn main() -> Result<(), EstampaError> {
                 mbox.0
             );
 
-            let certs_file = File::open(&conf.tls.certificate)?;
-            let key_file = File::open(&conf.tls.private_key)?;
-
-            let mut cert_pem = String::new();
-            certs_file.try_clone()?.read_to_string(&mut cert_pem)?;
-
-            let mut key_pem = String::new();
-            key_file.try_clone()?.read_to_string(&mut key_pem)?;
-
-            let root_sig = KeyPair::from_pem(&key_pem)?;
-            let parent_cert =
-                CertificateParams::from_ca_cert_pem(&cert_pem)?.self_signed(&root_sig)?;
-
-            let mut params = CertificateParams::new(vec![conf.base.host.clone()])?;
-            let mut dn = DistinguishedName::new();
-
-            dn.push(DnType::CustomDnType(UID_OID.to_vec()), mbox.0.clone());
-            dn.push(DnType::CommonName, mbox.1.name.clone());
-
-            params.distinguished_name = dn;
-
-            let now = OffsetDateTime::now_utc();
-            params.not_after = now.replace_year(now.year() + 5)?;
-
-            let key = KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256)?;
-            let cert = params.signed_by(&key, &parent_cert, &root_sig)?;
-
-            File::create(&mbox.1.certificate)?.write_all(&cert.pem().into_bytes())?;
-            File::create(
-                // TODO(otoayana): Clean this up, maybe by adding a new error item
-                &mbox
-                    .1
-                    .certificate
-                    .parent()
-                    .unwrap()
-                    .to_path_buf()
-                    .join(format!(
-                        "{}.key",
-                        &mbox
-                            .1
-                            .certificate
-                            .file_name()
-                            .unwrap()
-                            .to_string_lossy()
-                            .split_once(".")
-                            .unwrap()
-                            .0,
-                    )),
-            )?
-            .write_all(&key.serialize_pem().into_bytes())?;
+            Cert::generate_client(
+                mbox,
+                &conf.base.host,
+                &conf.tls.certificate,
+                &conf.tls.private_key,
+            )
+            .await?;
 
             info!(
                 "generated certificate for mailbox {}. keep your private key safe!",
@@ -149,7 +100,7 @@ async fn main() -> Result<(), EstampaError> {
 
     let config = Arc::new(
         ServerConfig::builder()
-            .with_client_cert_verifier(Arc::new(tls::EstampaClientAuth))
+            .with_client_cert_verifier(Arc::new(tls::auth::EstampaClientAuth))
             .with_single_cert(certs, key)?,
     );
     let acceptor = TlsAcceptor::from(config);

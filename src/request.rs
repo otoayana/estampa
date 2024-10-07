@@ -1,5 +1,6 @@
+use crate::config::Mailbox;
 use crate::error::RequestError;
-use crate::{config::Mailbox, tls};
+use crate::tls::Cert;
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Write};
@@ -83,7 +84,7 @@ impl Message {
         cert: CertificateDer<'_>,
         stream: &mut I,
     ) -> Result<Self, RequestError> {
-        let sender = tls::verify(&cert, trust_store).await?;
+        let sender = Cert::verify(&cert, trust_store).await?;
 
         let mut buf = String::new();
 
