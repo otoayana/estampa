@@ -28,15 +28,9 @@ features = ["derive"]
 version = "1.40"
 features = ["fs", "io-util", "macros", "net", "rt-multi-thread"]
 
-[dependencies.x509-cert]
-version = "0.2"
-features = ["std", "pem"]
-default-features = false
-
-[dependencies.x509-verify]
-version = "0.4"
-features = ["rsa", "sha2"]
-default-features = false
+[dependencies.x509-parser]
+version = "0.16"
+features = ["verify"]
 
 [profile.release]
 strip = true

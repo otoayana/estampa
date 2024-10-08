@@ -14,8 +14,8 @@ use std::{
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use tracing::debug;
-use x509_cert::der::{Encode, Length};
-use x509_cert::Certificate;
+use x509_parser::der_parser::asn1_rs::ToDer;
+use x509_parser::pem::parse_x509_pem;
 
 /*
     Only Misfin(B) will be implemented at first. Once we have basic
@@ -151,23 +151,17 @@ impl Message {
         cert_file.read_to_end(&mut cert_buf)?;
 
         let mut hasher = Sha256::new();
-        let pemchain = Certificate::load_pem_chain(&cert_buf)
-            .map_err(|e| RequestError::Verification(crate::error::VerificationError::X509(e)))?;
 
-        hasher.update(
-            pemchain
-                .first()
-                // This unwrap might be a little overcomplicated, but does the trick :^)
-                .ok_or(RequestError::Verification(
-                    crate::error::VerificationError::X509(x509_cert::der::Error::new(
-                        x509_cert::der::ErrorKind::FileNotFound,
-                        Length::new(0),
-                    )),
-                ))?
-                .to_der()
-                .map_err(|e| RequestError::Verification(crate::error::VerificationError::X509(e)))?
-                .to_vec(),
-        );
+        // TODO(otoayana): Handle these errors better
+        let pem = parse_x509_pem(&cert_buf).map_err(|_| {
+            RequestError::Verification(crate::error::VerificationError::InvalidCertificate)
+        })?;
+
+        let der = pem.0.to_der_vec().map_err(|_| {
+            RequestError::Verification(crate::error::VerificationError::InvalidCertificate)
+        })?;
+
+        hasher.update(der);
 
         let fingerprint = hasher.finalize();
         let mut fp_fmt = String::new();

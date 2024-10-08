@@ -52,8 +52,8 @@ pub enum VerificationError {
     InvalidCertificate,
     #[error("invalid hostname")]
     InvalidHostname,
-    #[error("(from x509_cert) {0}")]
-    X509(#[from] x509_cert::der::Error),
+    #[error("(from x509_parser) {0}")]
+    X509(#[from] x509_parser::error::X509Error),
     #[error("(io error) {0}")]
     IO(#[from] std::io::Error),
 }

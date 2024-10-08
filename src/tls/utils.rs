@@ -1,9 +1,11 @@
-use std::{
-    path::PathBuf,
-    sync::{Arc, LazyLock},
+use crate::{
+    config::Mailbox,
+    error::{EstampaError, VerificationError},
+    request::Identity,
+    tls::auth::EstampaServerAuth,
 };
-
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
+use std::{io::Read, path::PathBuf, sync::Arc};
 use time::OffsetDateTime;
 use tokio::{
     fs::File,
@@ -12,31 +14,21 @@ use tokio::{
 };
 use tokio_rustls::{
     rustls::{
-        pki_types::{CertificateDer, ServerName},
+        pki_types::{CertificateDer, ServerName, SubjectPublicKeyInfoDer},
+        server::ParsedCertificate,
         ClientConfig,
     },
     TlsConnector,
 };
 use tracing::debug;
-use x509_cert::{
-    der::{asn1::BitString, oid::AssociatedOid, Decode, Encode},
-    ext::pkix::SubjectAltName,
-    spki::ObjectIdentifier,
-    Certificate,
-};
-use x509_verify::{Signature, VerifyInfo, VerifyingKey};
-
-use crate::{
-    config::Mailbox,
-    error::{EstampaError, VerificationError},
-    request::Identity,
-    tls::auth::EstampaServerAuth,
+use x509_parser::{
+    der_parser::Oid,
+    prelude::{FromDer, GeneralName, X509Certificate},
+    x509::SubjectPublicKeyInfo,
 };
 
-const UID_OID: [u64; 7] = [0, 9, 2342, 19200300, 100, 1, 1];
-static UID_OID_X509: LazyLock<ObjectIdentifier> = LazyLock::new(|| {
-    ObjectIdentifier::from_arcs(UID_OID.clone().iter().map(|v| *v as u32)).unwrap()
-});
+// Object identifier for the "UID" field. Not recognized by many x509 libraries
+const X509_OID_UID: [u64; 7] = [0, 9, 2342, 19200300, 100, 1, 1];
 
 pub struct Cert;
 
@@ -93,7 +85,10 @@ impl Cert {
         let mut params = CertificateParams::new(vec![host.to_string()])?;
         let mut dn = DistinguishedName::new();
 
-        dn.push(DnType::CustomDnType(UID_OID.to_vec()), mailbox.0.clone());
+        dn.push(
+            DnType::CustomDnType(X509_OID_UID.to_vec()),
+            mailbox.0.clone(),
+        );
         dn.push(DnType::CommonName, mailbox.1.name.clone());
 
         params.distinguished_name = dn;
@@ -124,59 +119,35 @@ impl Cert {
         cert: &CertificateDer<'a>,
         trust_path: PathBuf,
     ) -> Result<Identity, VerificationError> {
-        let parsed = Certificate::from_der(&cert)?;
-        let tbs = parsed.tbs_certificate;
+        let parsed = X509Certificate::from_der(cert).unwrap().1;
 
-        let uid: String = tbs
-            .subject
-            .0
-            .iter()
-            .filter(|v| {
-                v.0.iter()
-                    .filter(|n| n.oid == *UID_OID_X509)
-                    .next()
-                    .is_some()
-            })
-            .map(|v| v.0.iter().next().clone())
-            .filter(|v| v.is_some())
-            .map(|v| v.unwrap())
-            .next()
+        let san = parsed
+            .subject_alternative_name()?
             .ok_or(VerificationError::InvalidCertificate)?
             .value
-            .decode_as()?;
+            .general_names
+            .first();
 
-        // SANs need to be fetched through the certificates' extensions
-        let extensions = tbs
-            .clone()
-            .extensions
-            .ok_or(VerificationError::InvalidCertificate)?;
-
-        let hostname = {
-            let inner: String = {
-                String::from_utf8_lossy(
-                    extensions
-                        .iter()
-                        .filter(|x| x.extn_id == SubjectAltName::OID)
-                        .next()
-                        .ok_or(VerificationError::InvalidCertificate)?
-                        .extn_value
-                        .clone()
-                        .as_bytes(),
-                )
-                .to_string()
-                .chars()
-                .filter(|c| c.is_ascii_alphabetic() || *c == '.')
-                .collect()
-            };
-
-            inner
+        let hostname = if let Some(GeneralName::DNSName(value)) = san {
+            value
+        } else {
+            return Err(VerificationError::InvalidCertificate);
         };
 
-        debug!("sender hostname parsed ({})", hostname);
+        let uid = parsed
+            .tbs_certificate
+            .subject
+            .iter_by_oid(&Oid::from(&X509_OID_UID).unwrap())
+            .next()
+            .ok_or(VerificationError::InvalidCertificate)
+            .map_err(|_| VerificationError::InvalidCertificate)?
+            .as_str()?;
+
+        debug!("sender certificate parsed ({}@{})", &uid, hostname);
 
         let local_cert_path = trust_path.join(format!("{}.spki", hostname));
 
-        let spki: VerifyingKey = if local_cert_path.exists() {
+        let spki = if local_cert_path.exists() {
             let mut raw: Vec<u8> = vec![];
 
             File::open(&local_cert_path)
@@ -184,9 +155,7 @@ impl Cert {
                 .read_to_end(&mut raw)
                 .await?;
 
-            let out: x509_cert::spki::SubjectPublicKeyInfo<x509_cert::der::Any, BitString> =
-                x509_cert::spki::SubjectPublicKeyInfo::try_from(raw.as_slice())
-                    .map_err(|_| VerificationError::InvalidSignature)?;
+            let out = SubjectPublicKeyInfoDer::try_from(raw).unwrap();
 
             out
         } else {
@@ -214,12 +183,11 @@ impl Cert {
                 .unwrap()
                 .to_owned();
 
-            let out = Certificate::from_der(&server_cert)?
-                .tbs_certificate
-                .subject_public_key_info;
-            let mut buf: Vec<u8> = vec![];
+            let out = ParsedCertificate::try_from(&server_cert)
+                .unwrap()
+                .subject_public_key_info();
 
-            out.clone().encode_to_vec(&mut buf)?;
+            let buf: Vec<u8> = out.clone().to_vec();
 
             // Cache the SPKI for later usage
             File::create(&local_cert_path)
@@ -228,20 +196,20 @@ impl Cert {
                 .await?;
 
             out
-        }
-        .try_into()
-        .map_err(|_| VerificationError::InvalidSignature)?;
+        };
 
-        let verification_info = VerifyInfo::new(
-            tbs.clone().to_der()?.into(),
-            Signature::new(
-                &parsed.signature_algorithm,
-                parsed.signature.as_bytes().unwrap(),
-            ),
-        );
-
-        spki.verify(verification_info)
-            .map_err(|_| VerificationError::InvalidSignature)?;
+        parsed.verify_signature(Some(
+            &SubjectPublicKeyInfo::from_der(
+                &spki
+                    .bytes()
+                    .filter(|b| b.is_ok())
+                    .map(|b| b.unwrap())
+                    .collect::<Vec<u8>>()
+                    .as_slice(),
+            )
+            .unwrap()
+            .1,
+        ))?;
 
         debug!("sender certificate is valid");
 
