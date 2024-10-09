@@ -103,13 +103,11 @@ impl Cert {
             .await?
             .write_all(&cert.pem().into_bytes())
             .await?;
-        File::create(
-            // TODO(otoayana): Clean this up, maybe by adding a new error item
-            &store.join(format!("certs/priv/{}.pem", &mailbox.0)),
-        )
-        .await?
-        .write_all(&key.serialize_pem().into_bytes())
-        .await?;
+	
+        File::create(&store.join(format!("certs/priv/{}.pem", &mailbox.0)))
+            .await?
+            .write_all(&key.serialize_pem().into_bytes())
+            .await?;
 
         Ok(())
     }

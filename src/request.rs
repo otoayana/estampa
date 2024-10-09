@@ -43,12 +43,17 @@ impl FromStr for Message {
             .strip_prefix("misfin://")
             .and_then(|s| s.split_once('@'))
             .ok_or(RequestError::InvalidRequest)?;
+
         let (hostname, remainder) = remainder
             .split_once(' ')
             .ok_or(RequestError::InvalidRequest)?;
-        let message = remainder
+
+        let mut message = remainder
             .strip_suffix("\r\n")
-            .ok_or(RequestError::InvalidRequest)?;
+            .ok_or(RequestError::InvalidRequest)?
+            .to_string();
+
+        message.push_str("\n");
 
         Ok(Message {
             sender: Identity {
@@ -59,7 +64,7 @@ impl FromStr for Message {
                 mailbox: mailbox.to_string(),
                 hostname: hostname.to_string(),
             },
-            message: message.to_string(),
+            message,
         })
     }
 }
@@ -143,6 +148,7 @@ impl Message {
                 .join(format!("certs/{}.pem", self.recipient.mailbox)),
         )?;
         let mut cert_buf: Vec<u8> = vec![];
+
         debug!(
             "opening certificate for mailbox {}",
             &self.recipient.mailbox
