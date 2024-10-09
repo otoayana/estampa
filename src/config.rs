@@ -30,7 +30,7 @@ pub struct Mailbox {
     pub name: String,
 }
 
-static STORE_TREE: [&'static str; 4] = ["certs/", "certs/priv/", "trust/", "mbox/"];
+pub static STORE_TREE: [&'static str; 4] = ["certs/", "certs/priv/", "trust/", "mbox/"];
 
 impl Config {
     /// Loads and parses an Estampa config file

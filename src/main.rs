@@ -4,6 +4,9 @@ mod request;
 mod response;
 mod tls;
 
+#[cfg(test)]
+mod test;
+
 use crate::error::EstampaError;
 use config::Config;
 use error::Responder;
