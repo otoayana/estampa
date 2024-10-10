@@ -1,5 +1,6 @@
 mod config;
 mod error;
+mod handler;
 mod request;
 mod response;
 mod tls;
@@ -9,9 +10,7 @@ mod test;
 
 use crate::error::EstampaError;
 use config::Config;
-use error::Responder;
-use request::Message;
-use response::{Response, Status};
+use handler::handler;
 use std::{
     fs::File,
     io::{self, BufReader},
@@ -19,12 +18,12 @@ use std::{
     sync::Arc,
 };
 use tls::Cert;
-use tokio::{io::BufStream, net::TcpListener};
+use tokio::net::TcpListener;
 use tokio_rustls::{
     rustls::{pki_types::CertificateDer, server::ServerConfig},
     TlsAcceptor,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -121,61 +120,10 @@ async fn main() -> Result<(), EstampaError> {
     let memory = Arc::new(conf);
 
     loop {
-        let (mut socket, _) = listen.accept().await?;
+        let (socket, _) = listen.accept().await?;
         let acceptor = acceptor.clone();
-        let inner_mem = memory.clone();
+        let memory = memory.clone();
 
-        tokio::spawn(async move {
-            match acceptor.accept(&mut socket).await {
-                Ok(stream) => {
-                    let certs: Option<CertificateDer> =
-                        if let Some(val) = stream.get_ref().1.peer_certificates() {
-                            Some(val.get(0).unwrap().to_owned())
-                        } else {
-                            None
-                        };
-                    let mut buf = BufStream::new(stream);
-
-                    let (status, message): (Status, Option<Message>) = if let Some(val) = certs {
-                        match Message::from(inner_mem.base.store.join("trust/"), val, &mut buf)
-                            .await
-                        {
-                            Ok(msg) => (
-                                match msg
-                                    .save(
-                                        &inner_mem.base.store,
-                                        &inner_mem.mailbox,
-                                        &inner_mem.base.host,
-                                    )
-                                    .await
-                                {
-                                    Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
-                                    Err(err) => err.into_response(),
-                                },
-                                Some(msg),
-                            ),
-                            Err(err) => (err.into_response(), None),
-                        }
-                    } else {
-                        (Status::CERTIFICATE_REQUIRED, None)
-                    };
-
-                    match Response::from(status.clone()).write(&mut buf).await {
-                        Ok(_) => {
-                            debug!("response sent ({status})");
-                            if matches!(status, Status::MESSAGE_DELIVERED(_)) {
-                                let u_message = message.unwrap();
-                                info!(
-                                    "message received ({} -> {})",
-                                    u_message.sender, u_message.recipient
-                                );
-                            }
-                        }
-                        Err(msg) => error!("response failed ({msg})"),
-                    }
-                }
-                Err(err) => error!("connection error ({err})"),
-            }
-        });
+        tokio::spawn(handler(socket, acceptor, memory));
     }
 }
