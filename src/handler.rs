@@ -5,7 +5,10 @@ use crate::{
     response::{Response, Status},
 };
 use std::sync::Arc;
-use tokio::{io::BufStream, net::TcpStream};
+use tokio::{
+    io::{AsyncWriteExt, BufStream},
+    net::TcpStream,
+};
 use tokio_rustls::{rustls::pki_types::CertificateDer, TlsAcceptor};
 use tracing::{debug, error, info};
 
@@ -52,6 +55,10 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                 }
                 Err(msg) => error!("response failed ({msg})"),
             }
+
+            if let None = buf.shutdown().await.ok() {
+                error!("connection closed early");
+            };
         }
         Err(err) => error!("connection error ({err})"),
     }
