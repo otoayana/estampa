@@ -75,7 +75,7 @@ async fn main() -> Result<(), EstampaError> {
 
     // Create client certificates for each mailbox if not present
     for mbox in &conf.mailbox {
-        if conf
+        if !conf
             .base
             .store
             .join(format!("certs/{}", mbox.0))
