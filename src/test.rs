@@ -3,9 +3,13 @@ use crate::{
     request::Message,
     tls::Cert,
 };
-use std::{collections::HashMap, fs, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, fs, io::BufReader, path::PathBuf, str::FromStr, sync::Arc};
 use tempfile::tempdir;
-use tokio::{fs::File, io::AsyncReadExt};
+use tokio::{fs::File, io::AsyncReadExt, net::TcpListener};
+use tokio_rustls::{
+    rustls::{pki_types::CertificateDer, ServerConfig},
+    TlsAcceptor,
+};
 
 #[tokio::test]
 async fn initialize_store() {
@@ -79,7 +83,7 @@ async fn generate_client_certificate() {
     let dir = tempdir().unwrap().into_path();
 
     // Any errors that occur around these steps are already handled by
-    // the cert_gen_server() test.
+    // the generate_server_certificate() test.
     let server_cert_path = dir.clone().join("cert.pem");
     let server_key_path = dir.clone().join("key.pem");
 
@@ -142,6 +146,113 @@ async fn generate_client_certificate() {
 
     assert!(reader.is_ok(), "client private key could not be read");
     assert!(!client_key.is_empty(), "client private key is empty")
+}
+
+#[tokio::test]
+async fn verify_certificate() {
+    let dir = tempdir().unwrap().into_path();
+
+    // Any errors that occur around these steps are already handled by
+    // both the generate_server_certificate(), and
+    // generate_client_certificate() tests.
+
+    let server_cert_path = dir.clone().join("cert.pem");
+    let server_key_path = dir.clone().join("key.pem");
+
+    Cert::generate_server("localhost", &server_cert_path, &server_key_path)
+        .await
+        .unwrap();
+
+    let config = Config {
+        base: Base {
+            bind: "0.0.0.0:1958".to_string(),
+            host: "localhost".to_string(),
+            store: dir.clone().join("store/"),
+        },
+        tls: Tls {
+            certificate: server_cert_path.to_path_buf(),
+            private_key: server_key_path.to_path_buf(),
+        },
+        mailbox: HashMap::new(),
+    };
+
+    config.init().await.unwrap();
+
+    Cert::generate_client(
+        &config.base.store,
+        (
+            &String::from("skye"),
+            &Mailbox {
+                enabled: true,
+                name: "Skylar".to_string(),
+            },
+        ),
+        "localhost",
+        &server_cert_path,
+        &server_key_path,
+    )
+    .await
+    .unwrap();
+
+    // We need a dummy server for the certificate verifier to connect to
+    let listen = TcpListener::bind("0.0.0.0:1958").await;
+
+    assert!(listen.is_ok(), "couldn't bind server: {listen:?}");
+    let listen = listen.unwrap();
+
+    let certs_file = std::fs::File::open(&config.tls.certificate).unwrap();
+    let key_file = std::fs::File::open(&config.tls.private_key).unwrap();
+
+    let server_certs = rustls_pemfile::certs(&mut BufReader::new(certs_file))
+        .collect::<Result<Vec<CertificateDer>, std::io::Error>>()
+        .unwrap();
+    let server_key = rustls_pemfile::private_key(&mut BufReader::new(key_file))
+        .unwrap()
+        .unwrap();
+
+    let server_config = Arc::new(
+        ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(server_certs, server_key)
+            .unwrap(),
+    );
+
+    let acceptor = TlsAcceptor::from(server_config);
+
+    tokio::spawn(async move {
+        // Only one request needs to be accepted. Don't loop.
+        let (mut socket, _) = listen.accept().await.unwrap();
+        acceptor.accept(&mut socket).await.unwrap();
+    });
+
+    let client_cert_path = config.base.store.clone().join("certs/skye.pem");
+    let mut client_cert_raw: Vec<u8> = vec![];
+
+    File::open(&client_cert_path)
+        .await
+        .unwrap()
+        .read_to_end(&mut client_cert_raw)
+        .await
+        .unwrap();
+
+    let mut reader = std::io::BufReader::new(&*client_cert_raw);
+    let certificate_pem = rustls_pemfile::certs(&mut reader).next();
+
+    assert!(
+        certificate_pem.as_ref().is_some_and(|v| v.is_ok()),
+        "unable to read client certificate"
+    );
+
+    let verify = Cert::verify(
+        &certificate_pem.unwrap().unwrap(),
+        config.base.store.clone().join("trust/"),
+    )
+    .await;
+
+    assert!(
+        verify.is_ok(),
+        "certificate verification failed: {verify:?}"
+    )
 }
 
 #[tokio::test]
