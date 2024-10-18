@@ -11,6 +11,8 @@ use tokio_rustls::{
     TlsAcceptor,
 };
 
+const MESSAGE_BODY: &'static str = "misfin://skye@localhost Hi there!\r\n";
+
 #[tokio::test]
 async fn initialize_store() {
     let dir = tempdir().unwrap().into_path();
@@ -257,7 +259,7 @@ async fn verify_certificate() {
 
 #[tokio::test]
 async fn parse_b_request() {
-    let message = Message::from_str("misfin://skye@example.com Hi there!\r\n");
+    let message = Message::from_str(MESSAGE_BODY);
 
     assert!(
         message.is_ok(),
@@ -271,11 +273,114 @@ async fn parse_b_request() {
         "unexpected value in mailbox field",
     );
     assert_eq!(
-        message.recipient.hostname, "example.com",
+        message.recipient.hostname, "localhost",
         "unexpected value in hostname field",
     );
     assert_eq!(
         message.message, "Hi there!\n",
         "unexpected value in message field"
     );
+}
+
+#[tokio::test]
+async fn store_b_request() {
+    let dir = tempdir().unwrap().into_path();
+
+    // Any errors that occur around these steps are already handled by
+    // both the generate_server_certificate(), and
+    // generate_client_certificate() tests.
+
+    let server_cert_path = dir.clone().join("cert.pem");
+    let server_key_path = dir.clone().join("key.pem");
+
+    Cert::generate_server("localhost", &server_cert_path, &server_key_path)
+        .await
+        .unwrap();
+
+    let mut config = Config {
+        base: Base {
+            bind: "0.0.0.0:1958".to_string(),
+            host: "localhost".to_string(),
+            store: dir.clone().join("store/"),
+        },
+        tls: Tls {
+            certificate: server_cert_path.clone().to_path_buf(),
+            private_key: server_key_path.clone().to_path_buf(),
+        },
+        mailbox: HashMap::new(),
+    };
+
+    config.mailbox.insert(
+        "skye".to_string(),
+        Mailbox {
+            enabled: true,
+            name: "Skye".to_string(),
+        },
+    );
+
+    config.init().await.unwrap();
+
+    Cert::generate_client(
+        &config.base.store,
+        (
+            &String::from("skye"),
+            &Mailbox {
+                enabled: true,
+                name: "Skylar".to_string(),
+            },
+        ),
+        "localhost",
+        &server_cert_path,
+        &server_key_path,
+    )
+    .await
+    .unwrap();
+
+    // Spawn dummy server
+    let listen = TcpListener::bind("0.0.0.0:1958").await;
+
+    assert!(listen.is_ok(), "couldn't bind server: {listen:?}");
+    let listen = listen.unwrap();
+
+    let certs_file = std::fs::File::open(&config.tls.certificate).unwrap();
+    let key_file = std::fs::File::open(&config.tls.private_key).unwrap();
+
+    let server_certs = rustls_pemfile::certs(&mut BufReader::new(certs_file))
+        .collect::<Result<Vec<CertificateDer>, std::io::Error>>()
+        .unwrap();
+    let server_key = rustls_pemfile::private_key(&mut BufReader::new(key_file))
+        .unwrap()
+        .unwrap();
+
+    let server_config = Arc::new(
+        ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(server_certs.clone(), server_key)
+            .unwrap(),
+    );
+
+    let acceptor = TlsAcceptor::from(server_config);
+
+    tokio::spawn(async move {
+        // Only one request needs to be accepted. Don't loop.
+        let (mut socket, _) = listen.accept().await.unwrap();
+        acceptor.accept(&mut socket).await.unwrap();
+    });
+
+    let message = Message::from_str(MESSAGE_BODY).unwrap();
+    let save = message
+        .save(&config.base.store, &config.mailbox, "localhost")
+        .await;
+
+    assert!(save.is_ok(), "message failed to save: ({save:#?})");
+
+    let mut mailbox = config
+        .base
+        .store
+        .clone()
+        .join("mbox/skye")
+        .read_dir()
+        .unwrap();
+
+    assert!(mailbox.next().is_some(), "no messages found in mailbox");
 }
