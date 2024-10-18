@@ -9,12 +9,14 @@ mod tls;
 mod test;
 
 use crate::error::EstampaError;
+use clap::Parser;
 use config::Config;
 use handler::handler;
 use std::{
     fs::File,
     io::{self, BufReader},
     path::PathBuf,
+    str::FromStr,
     sync::Arc,
 };
 use tls::Cert;
@@ -27,9 +29,30 @@ use tracing::{error, info, warn};
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
+#[derive(Parser)]
+#[command(
+    version,
+    about = "Minimalist server for the Misfin protocol",
+    long_about = None
+)]
+struct Cli {
+    #[arg(
+        short,
+        long,
+        value_name = "FILE",
+        help = "Specifies a TOML file to use for configuration (default: ./config.toml)"
+    )]
+    config: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), EstampaError> {
-    let conf = Config::open(PathBuf::from("./config.toml")).await?;
+    let args = Cli::parse();
+    let conf = Config::open(
+        args.config
+            .unwrap_or(PathBuf::from_str("./config.toml").unwrap()),
+    )
+    .await?;
 
     let subscriber = tracing_subscriber::fmt()
         .compact()
