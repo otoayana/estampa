@@ -45,7 +45,7 @@ async fn generate_server_certificate() {
     let cert_path = dir.clone().join("cert.pem");
     let key_path = dir.clone().join("key.pem");
 
-    let generator = Cert::generate_server("example.com", &cert_path, &key_path).await;
+    let generator = Cert::generate_server("localhost", &cert_path, &key_path).await;
 
     assert!(
         generator.is_ok(),
@@ -85,11 +85,12 @@ async fn generate_client_certificate() {
     let dir = tempdir().unwrap().into_path();
 
     // Any errors that occur around these steps are already handled by
-    // the generate_server_certificate() test.
+    // the generate_server_certificate() test. These certificates are
+    // needed to sign a client certificate.
     let server_cert_path = dir.clone().join("cert.pem");
     let server_key_path = dir.clone().join("key.pem");
 
-    Cert::generate_server("example.com", &server_cert_path, &server_key_path)
+    Cert::generate_server("localhost", &server_cert_path, &server_key_path)
         .await
         .unwrap();
 
@@ -110,7 +111,7 @@ async fn generate_client_certificate() {
     let generate = Cert::generate_client(
         &dir,
         (&mbox_name, &mbox_conf),
-        "example.com",
+        "localhost",
         &server_cert_path,
         &server_key_path,
     )
@@ -155,9 +156,7 @@ async fn verify_certificate() {
     let dir = tempdir().unwrap().into_path();
 
     // Any errors that occur around these steps are already handled by
-    // both the generate_server_certificate(), and
-    // generate_client_certificate() tests.
-
+    // previous tests.
     let server_cert_path = dir.clone().join("cert.pem");
     let server_key_path = dir.clone().join("key.pem");
 
@@ -287,9 +286,7 @@ async fn store_b_request() {
     let dir = tempdir().unwrap().into_path();
 
     // Any errors that occur around these steps are already handled by
-    // both the generate_server_certificate(), and
-    // generate_client_certificate() tests.
-
+    // previous tests.
     let server_cert_path = dir.clone().join("cert.pem");
     let server_key_path = dir.clone().join("key.pem");
 
