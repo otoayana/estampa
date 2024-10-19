@@ -1,0 +1,16 @@
+[Unit]
+Description=Minimalist server for the Misfin protocol
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=estampa
+WorkingDirectory=/var/lib/estampa/
+ExecStart=/var/lib/estampa/.cargo/bin/estampa
+
+[Install]
+WantedBy=multi-user.target
+
