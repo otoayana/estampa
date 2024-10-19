@@ -101,9 +101,9 @@ async fn main() -> Result<(), EstampaError> {
         if !conf
             .base
             .store
-            .join(format!("certs/{}", mbox.0))
-            .exists()
+            .join(format!("certs/{}.pem", mbox.0))
             .clone()
+            .exists()
         {
             warn!(
                 "ceritificate not found for mailbox {}. generating...",
