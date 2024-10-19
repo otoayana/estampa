@@ -10,18 +10,17 @@ use tokio::{
     net::TcpStream,
 };
 use tokio_rustls::{rustls::pki_types::CertificateDer, TlsAcceptor};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Reads requests and writes responses to an open TLS stream
 pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<Config>) {
     match acceptor.accept(&mut socket).await {
         Ok(stream) => {
-            let certs: Option<CertificateDer> =
-                if let Some(val) = stream.get_ref().1.peer_certificates() {
-                    Some(val.get(0).unwrap().to_owned())
-                } else {
-                    None
-                };
+            let certs: Option<CertificateDer> = stream
+                .get_ref()
+                .1
+                .peer_certificates()
+                .and_then(|v| v.get(0).map(|v| v.to_owned()));
             let mut buf = BufStream::new(stream);
 
             let (status, message): (Status, Option<Message>) = if let Some(val) = certs {
@@ -46,11 +45,11 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                 Ok(_) => {
                     debug!("response sent ({status})");
                     if matches!(status, Status::MESSAGE_DELIVERED(_)) {
-                        let u_message = message.unwrap();
-                        info!(
-                            "message received ({} -> {})",
-                            u_message.sender, u_message.recipient
-                        );
+                        if let Some(inner) = message {
+                            info!("message received ({} -> {})", inner.sender, inner.recipient)
+                        } else {
+                            warn!("message received, but contents unavailable")
+                        };
                     }
                 }
                 Err(msg) => error!("response failed ({msg})"),

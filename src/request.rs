@@ -13,7 +13,7 @@ use std::{
 };
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use tokio_rustls::rustls::pki_types::CertificateDer;
-use tracing::debug;
+use tracing::{debug, error};
 use x509_parser::der_parser::asn1_rs::ToDer;
 use x509_parser::pem::parse_x509_pem;
 
@@ -149,34 +149,36 @@ impl Message {
         )?;
         let mut cert_buf: Vec<u8> = vec![];
 
-        debug!(
-            "opening certificate for mailbox {}",
-            &self.recipient.mailbox
-        );
+        debug!("opening certificate for mailbox {}", self.recipient.mailbox);
 
         cert_file.read_to_end(&mut cert_buf)?;
 
         let mut hasher = Sha256::new();
 
-        // TODO(otoayana): Handle these errors better
-        let pem = parse_x509_pem(&cert_buf).map_err(|_| {
-            RequestError::Verification(crate::error::VerificationError::InvalidCertificate)
-        })?;
+        let cert = parse_x509_pem(&cert_buf)
+            .ok()
+            .and_then(|v| v.0.to_der_vec().ok())
+            .ok_or_else(|| {
+                error!(
+                    "certificate invalid for local mailbox {}!",
+                    self.recipient.mailbox
+                );
+                RequestError::BadMailboxCertificate
+            })?;
 
-        let der = pem.0.to_der_vec().map_err(|_| {
-            RequestError::Verification(crate::error::VerificationError::InvalidCertificate)
-        })?;
-
-        hasher.update(der);
-
+        hasher.update(cert);
         let fingerprint = hasher.finalize();
-        let mut fp_fmt = String::new();
 
+        // Certificate fingerprints need to be sent in an octet format
+        let mut fp_fmt = String::new();
         for oct in fingerprint {
             fp_fmt.push_str(format!("{:x}", oct).as_str())
         }
 
-        debug!("fingerprint is {:?}", &fingerprint);
+        debug!(
+            "fingerprint for mailbox {} is {}",
+            &self.recipient.mailbox, &fp_fmt
+        );
 
         Ok(fp_fmt)
     }

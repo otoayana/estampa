@@ -23,6 +23,7 @@ use tokio_rustls::{
 use tracing::debug;
 use x509_parser::{
     der_parser::Oid,
+    error::X509Error,
     prelude::{FromDer, GeneralName, X509Certificate},
     x509::SubjectPublicKeyInfo,
 };
@@ -103,7 +104,7 @@ impl Cert {
             .await?
             .write_all(&cert.pem().into_bytes())
             .await?;
-	
+
         File::create(&store.join(format!("certs/priv/{}.pem", &mailbox.0)))
             .await?
             .write_all(&key.serialize_pem().into_bytes())
@@ -117,7 +118,9 @@ impl Cert {
         cert: &CertificateDer<'a>,
         trust_path: PathBuf,
     ) -> Result<Identity, VerificationError> {
-        let parsed = X509Certificate::from_der(cert).unwrap().1;
+        let parsed = X509Certificate::from_der(cert)
+            .map_err(|_| VerificationError::InvalidCertificate)?
+            .1;
 
         let san = parsed
             .subject_alternative_name()?
@@ -153,7 +156,7 @@ impl Cert {
                 .read_to_end(&mut raw)
                 .await?;
 
-            let out = SubjectPublicKeyInfoDer::try_from(raw).unwrap();
+            let out = SubjectPublicKeyInfoDer::try_from(raw).map_err(|_| X509Error::InvalidSPKI)?;
 
             out
         } else {
@@ -176,13 +179,13 @@ impl Cert {
                 .get_ref()
                 .1
                 .peer_certificates()
-                .ok_or(VerificationError::InvalidSignature)?
+                .ok_or(VerificationError::InvalidHostname)?
                 .first()
-                .unwrap()
+                .ok_or(VerificationError::InvalidHostname)?
                 .to_owned();
 
             let out = ParsedCertificate::try_from(&server_cert)
-                .unwrap()
+                .map_err(|_| VerificationError::InvalidHostname)?
                 .subject_public_key_info();
 
             let buf: Vec<u8> = out.clone().to_vec();
@@ -196,18 +199,20 @@ impl Cert {
             out
         };
 
-        parsed.verify_signature(Some(
-            &SubjectPublicKeyInfo::from_der(
-                &spki
-                    .bytes()
-                    .filter(|b| b.is_ok())
-                    .map(|b| b.unwrap())
-                    .collect::<Vec<u8>>()
-                    .as_slice(),
-            )
-            .unwrap()
-            .1,
-        ))?;
+        parsed
+            .verify_signature(Some(
+                &SubjectPublicKeyInfo::from_der(
+                    &spki
+                        .bytes()
+                        .filter(|b| b.is_ok())
+                        .map(|b| b.unwrap())
+                        .collect::<Vec<u8>>()
+                        .as_slice(),
+                )
+                .unwrap()
+                .1,
+            ))
+            .map_err(|_| VerificationError::InvalidSignature)?;
 
         debug!("sender certificate is valid");
 
