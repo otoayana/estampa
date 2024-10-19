@@ -33,7 +33,7 @@ pub struct Mailbox {
 pub static STORE_TREE: [&'static str; 4] = ["certs/", "certs/priv/", "trust/", "mbox/"];
 
 impl Config {
-    /// Loads and parses an Estampa config file
+    /// Loads and parses an estampa config file
     pub async fn open(path: PathBuf) -> Result<Self, EstampaError> {
         let file = fs::read(path).await?;
         let raw = String::from_utf8_lossy(&file);
