@@ -77,7 +77,11 @@ impl Display for Identity {
 
 impl Display for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} -> {}", self.sender, self.recipient)
+        if self.message.len() > 0 {
+            write!(f, "{} -> {}", self.sender, self.recipient)
+        } else {
+            write!(f, "{}", self.recipient)
+        }
     }
 }
 
@@ -88,8 +92,6 @@ impl Message {
         cert: CertificateDer<'_>,
         stream: &mut I,
     ) -> Result<Self, RequestError> {
-        let sender = Cert::verify(&cert, trust_store).await?;
-
         let mut buf = String::new();
 
         while !buf.contains("\r\n") {
@@ -102,7 +104,12 @@ impl Message {
         }
 
         let mut request = buf.parse::<Message>()?;
-        request.sender = sender;
+
+        // Empty messages won't be verified
+        if request.message.len() > 0 {
+            let sender = Cert::verify(&cert, trust_store).await?;
+            request.sender = sender;
+        }
 
         debug!("request received ({request})");
         Ok(request)
@@ -127,19 +134,21 @@ impl Message {
             return Err(RequestError::MailboxDisabled);
         }
 
-        let now = SystemTime::now();
-        let time = now
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::new(0, 0))
-            .as_millis();
+        if self.message.len() > 0 {
+            let now = SystemTime::now();
+            let time = now
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::new(0, 0))
+                .as_millis();
 
-        let path = store.clone().join(format!(
-            "mbox/{}/{}-{}.gmi",
-            self.recipient.mailbox, time, self.sender
-        ));
+            let path = store.clone().join(format!(
+                "mbox/{}/{}-{}.gmi",
+                self.recipient.mailbox, time, self.sender
+            ));
 
-        let mut file = File::create(path)?;
-        file.write(self.message.as_bytes())?;
+            let mut file = File::create(path)?;
+            file.write(self.message.as_bytes())?;
+        }
 
         // Certificate is read to respond with a fingerprint
         let mut cert_file = File::open(
