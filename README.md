@@ -1,5 +1,7 @@
 # estampa 📬
 
+[![builds.sr.ht status](https://builds.sr.ht/~nixgoat/estampa.svg)](https://builds.sr.ht/~nixgoat/estampa?)
+
 estampa is a server for the Misfin protocol. Written in Rust, and
 powered by Tokio and rustls, it aims to provide an alternative, stable
 implementation for the protocol with a minimalist design.
