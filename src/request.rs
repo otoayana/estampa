@@ -104,7 +104,7 @@ impl Message {
         let mut request = buf.parse::<Message>()?;
 
         // Empty messages won't be verified
-        if !request.message.is_empty() {
+        if !request.message.trim().is_empty() {
             if let Some(inner) = cert {
                 let sender = Cert::verify(&inner, trust_store).await?;
                 request.sender = sender;
@@ -136,7 +136,7 @@ impl Message {
             return Err(RequestError::MailboxDisabled);
         }
 
-        if !self.message.is_empty() {
+        if !self.message.trim().is_empty() {
             let now = SystemTime::now();
             let time = now
                 .duration_since(UNIX_EPOCH)
