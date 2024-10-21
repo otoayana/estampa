@@ -62,12 +62,12 @@ impl Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}{}",
+            "{} {}",
             self.as_u8(),
             match self {
-                Self::MESSAGE_DELIVERED(fprint) => format!(" {}", fprint),
-                Self::SEND_HERE_INSTEAD(addr) => format!(" {}", addr),
-                Self::SEND_HERE_FOREVER(addr) => format!(" {}", addr),
+                Self::MESSAGE_DELIVERED(fprint) => fprint.clone(),
+                Self::SEND_HERE_INSTEAD(addr) => addr.clone(),
+                Self::SEND_HERE_FOREVER(addr) => addr.clone(),
                 _ => String::new(),
             }
         )
