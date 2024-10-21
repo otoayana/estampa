@@ -1,41 +1,40 @@
 # Welcome to estampa! The minimum amount of settings you'll need to
 # change to get your server working are:
 #
-# - host
+# - base.host
 # - mailbox.*
-#
-# If you're already hosting a Gemini capsule, please also change your
-# TLS settings so they point to your capsule's certificate and private
-# key. Otherwise, the server will generate them automatically in its
-# corresponding designated path.
-
 [base]
 bind = "0.0.0.0:1958"
 host = "localhost"
-# This will be the location where Estampa stores pretty much all of its
-# data. mailboxes, trusted servers, local certificates, etc. Keep this
+# This will be the location where estampa stores pretty much all of its
+# data. Mailboxes, trusted servers, local certificates, etc. Keep this
 # directory backed up and safe!
 store = "./store/"
 
+# If you're already hosting a Gemini capsule, change these settings
+# below, so the paths point to its certificate and private key.
+# Otherwise, the server will generate a pair automatically in those
+# locations.
 [tls]
 certificate = "./server.crt"
 private_key = "./server.key"
 
 # Mailboxes are defined declaratively. In order to define your mailbox,
-# you'll need to define a value within a mailbox.* block. Here's an
-# example:
+# you'll need to create a mailbox.* block. Here's an example:
 #
 # [mailbox.skye]
 # enabled = true
 # name = "Skylar"
 #
 # To break down which properties do what:
-# - "skye" will be the UID of your mailbox (ex. skye@example.com)
 #
-# - The "enabled" checks whether your account will be receiving new
-#   messages. If you've decided to move mailboxes, are getting a lot of
+# - The "skye" value within the block will be the UID of your mailbox
+#   (ex. skye@example.com)
+#
+# - "enabled" checks whether your account will be receiving any new
+#   messages. If you've decided to move mailboxes, are getting lots of
 #   spam, or just want to take a break from Misfin, you can set this
-#   option to "false", and messages from other users will be blocked.
+#   option to false, and messages from other users will be blocked.
 #
-# - The "name" property will be the fancy name of your mailbox. Set it
-#   to your own (pseudo-)name!
+# - "name" will be the fancy name of your mailbox. Set it to your own
+#   (pseudo-)name!
