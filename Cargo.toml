@@ -7,6 +7,7 @@ authors = ["Lux Aliaga <me@lux.rip>"]
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+pem = "3.0"
 rustls-pemfile = "2.1"
 sha2 = "0.10"
 thiserror = "1.0"

@@ -14,8 +14,6 @@ use std::{
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use tracing::{debug, error};
-use x509_parser::der_parser::asn1_rs::ToDer;
-use x509_parser::pem::parse_x509_pem;
 
 /*
     Only Misfin(B) will be implemented at first. Once we have basic
@@ -168,16 +166,14 @@ impl Message {
 
         let mut hasher = Sha256::new();
 
-        let cert = parse_x509_pem(&cert_buf)
-            .ok()
-            .and_then(|v| v.0.to_der_vec().ok())
-            .ok_or_else(|| {
-                error!(
-                    "certificate invalid for local mailbox {}!",
-                    self.recipient.mailbox
-                );
-                RequestError::BadMailboxCertificate
-            })?;
+        let pem = pem::parse(&cert_buf).map_err(|err| {
+            error!(
+                "certificate invalid for local mailbox {}: {err}",
+                self.recipient.mailbox
+            );
+            RequestError::BadMailboxCertificate
+        })?;
+        let cert = pem.contents();
 
         hasher.update(cert);
         let fingerprint = hasher.finalize();

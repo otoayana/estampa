@@ -407,6 +407,7 @@ name = "estampa"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "pem",
  "rcgen",
  "rustls-pemfile",
  "serde",
