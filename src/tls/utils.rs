@@ -5,7 +5,11 @@ use crate::{
     tls::auth::EstampaServerAuth,
 };
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
-use std::{io::Read, path::PathBuf, sync::Arc};
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use time::OffsetDateTime;
 use tokio::{
     fs::File,
@@ -23,7 +27,6 @@ use tokio_rustls::{
 use tracing::debug;
 use x509_parser::{
     der_parser::Oid,
-    error::X509Error,
     prelude::{FromDer, GeneralName, X509Certificate},
     x509::SubjectPublicKeyInfo,
 };
@@ -37,8 +40,8 @@ impl Cert {
     /// Generate a server certificate
     pub async fn generate_server<'a>(
         host: &'a str,
-        certificate: &PathBuf,
-        private_key: &PathBuf,
+        certificate: &Path,
+        private_key: &Path,
     ) -> Result<(), EstampaError> {
         let keypair = KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256)?;
         let mut cert_params = CertificateParams::new(vec![host.to_string()])?;
@@ -50,11 +53,12 @@ impl Cert {
 
         File::create(certificate)
             .await?
-            .write(&cert.pem().into_bytes())
+            .write_all(&cert.pem().into_bytes())
             .await?;
+
         File::create(private_key)
             .await?
-            .write(&keypair.serialize_pem().into_bytes())
+            .write_all(&keypair.serialize_pem().into_bytes())
             .await?;
 
         Ok(())
@@ -62,11 +66,11 @@ impl Cert {
 
     /// Generate a client certificate
     pub async fn generate_client<'a>(
-        store: &PathBuf,
+        store: &Path,
         mailbox: (&String, &Mailbox),
         host: &'a str,
-        host_certificate: &PathBuf,
-        host_private_key: &PathBuf,
+        host_certificate: &Path,
+        host_private_key: &Path,
     ) -> Result<(), EstampaError> {
         let mut cert_pem = String::new();
         File::open(host_certificate)
@@ -156,9 +160,7 @@ impl Cert {
                 .read_to_end(&mut raw)
                 .await?;
 
-            let out = SubjectPublicKeyInfoDer::try_from(raw).map_err(|_| X509Error::InvalidSPKI)?;
-
-            out
+            SubjectPublicKeyInfoDer::from(raw)
         } else {
             // Fetch and verify the certificate from the client's SAN
             let address = format!("{}:1958", hostname);
@@ -202,12 +204,7 @@ impl Cert {
         parsed
             .verify_signature(Some(
                 &SubjectPublicKeyInfo::from_der(
-                    &spki
-                        .bytes()
-                        .filter(|b| b.is_ok())
-                        .map(|b| b.unwrap())
-                        .collect::<Vec<u8>>()
-                        .as_slice(),
+                    spki.bytes().flatten().collect::<Vec<u8>>().as_slice(),
                 )
                 .unwrap()
                 .1,

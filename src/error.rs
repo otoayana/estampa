@@ -2,7 +2,7 @@ use crate::response::Status;
 use thiserror::Error;
 
 pub trait Responder {
-    fn into_response(&self) -> Status;
+    fn as_response(&self) -> Status;
 }
 
 #[derive(Error, Debug)]
@@ -82,7 +82,7 @@ pub enum VerificationError {
 }
 
 impl Responder for RequestError {
-    fn into_response(&self) -> Status {
+    fn as_response(&self) -> Status {
         match self {
             Self::CertificateRequired => Status::CERTIFICATE_REQUIRED,
             Self::MailboxNotFound => Status::MAILBOX_DOESNT_EXIST,
@@ -91,13 +91,13 @@ impl Responder for RequestError {
             Self::BadMailboxCertificate => Status::PERMANENT_ERROR,
             Self::MaxSizeExceeded | Self::InvalidRequest => Status::BAD_REQUEST,
             Self::IO(_) => Status::PERMANENT_ERROR,
-            Self::Verification(inner) => inner.into_response(),
+            Self::Verification(inner) => inner.as_response(),
         }
     }
 }
 
 impl Responder for VerificationError {
-    fn into_response(&self) -> Status {
+    fn as_response(&self) -> Status {
         match self {
             Self::InvalidCertificate => Status::CERTIFICATE_INVALID,
             Self::InvalidSignature | Self::InvalidHostname => Status::YOURE_A_LIAR,

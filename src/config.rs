@@ -30,7 +30,7 @@ pub struct Mailbox {
     pub name: String,
 }
 
-pub static STORE_TREE: [&'static str; 4] = ["certs/", "certs/priv/", "trust/", "mbox/"];
+pub static STORE_TREE: [&str; 4] = ["certs/", "certs/priv/", "trust/", "mbox/"];
 
 impl Config {
     /// Loads and parses an estampa config file
@@ -61,7 +61,7 @@ impl Config {
             .for_each(|mb| dirs.push(format!("mbox/{}", mb.0)));
 
         for dir in dirs.iter() {
-            let joined = self.base.store.clone().join(&dir);
+            let joined = self.base.store.clone().join(dir);
 
             if !joined.exists() {
                 fs::create_dir_all(&joined).await?;

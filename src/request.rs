@@ -4,7 +4,7 @@ use crate::tls::Cert;
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{
     collections::HashMap,
     fmt::Display,
@@ -51,7 +51,7 @@ impl FromStr for Message {
             .ok_or(RequestError::InvalidRequest)?
             .to_string();
 
-        message.push_str("\n");
+        message.push('\n');
 
         Ok(Message {
             sender: Identity {
@@ -75,7 +75,7 @@ impl Display for Identity {
 
 impl Display for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.message.len() > 0 {
+        if !self.message.is_empty() {
             write!(f, "{} -> {}", self.sender, self.recipient)
         } else {
             write!(f, "{}", self.recipient)
@@ -104,7 +104,7 @@ impl Message {
         let mut request = buf.parse::<Message>()?;
 
         // Empty messages won't be verified
-        if request.message.len() > 0 {
+        if !request.message.is_empty() {
             if let Some(inner) = cert {
                 let sender = Cert::verify(&inner, trust_store).await?;
                 request.sender = sender;
@@ -120,7 +120,7 @@ impl Message {
     /// Stores the message created in the request to the filesystem
     pub async fn save<'a>(
         &self,
-        store: &PathBuf,
+        store: &Path,
         available_mailboxes: &HashMap<String, Mailbox>,
         hostname: &'a str,
     ) -> Result<String, RequestError> {
@@ -136,28 +136,25 @@ impl Message {
             return Err(RequestError::MailboxDisabled);
         }
 
-        if self.message.len() > 0 {
+        if !self.message.is_empty() {
             let now = SystemTime::now();
             let time = now
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::new(0, 0))
                 .as_millis();
 
-            let path = store.clone().join(format!(
+            let path = store.join(format!(
                 "mbox/{}/{}-{}.gmi",
                 self.recipient.mailbox, time, self.sender
             ));
 
             let mut file = File::create(path)?;
-            file.write(self.message.as_bytes())?;
+            file.write_all(self.message.as_bytes())?;
         }
 
         // Certificate is read to respond with a fingerprint
-        let mut cert_file = File::open(
-            store
-                .clone()
-                .join(format!("certs/{}.pem", self.recipient.mailbox)),
-        )?;
+        let mut cert_file =
+            File::open(store.join(format!("certs/{}.pem", self.recipient.mailbox)))?;
         let mut cert_buf: Vec<u8> = vec![];
 
         debug!("opening certificate for mailbox {}", self.recipient.mailbox);

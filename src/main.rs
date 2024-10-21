@@ -27,7 +27,7 @@ use tokio_rustls::{
 };
 use tracing::{error, info, warn};
 
-static VERSION: &'static str = env!("CARGO_PKG_VERSION");
+static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser)]
 #[command(

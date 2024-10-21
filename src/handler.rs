@@ -20,7 +20,7 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                 .get_ref()
                 .1
                 .peer_certificates()
-                .and_then(|v| v.get(0).map(|v| v.to_owned()));
+                .and_then(|v| v.first().map(|v| v.to_owned()));
             let mut buf = BufStream::new(stream);
 
             let (status, message): (Status, Option<Message>) =
@@ -31,11 +31,11 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                             .await
                         {
                             Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
-                            Err(err) => err.into_response(),
+                            Err(err) => err.as_response(),
                         },
                         Some(msg),
                     ),
-                    Err(err) => (err.into_response(), None),
+                    Err(err) => (err.as_response(), None),
                 };
 
             match Response::from(status.clone()).write(&mut buf).await {
@@ -52,7 +52,7 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                 Err(msg) => error!("response failed ({msg})"),
             }
 
-            if let None = buf.shutdown().await.ok() {
+            if buf.shutdown().await.ok().is_none() {
                 error!("connection closed early");
             };
         }
