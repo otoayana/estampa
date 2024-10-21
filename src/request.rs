@@ -89,7 +89,7 @@ impl Message {
     /// Issue a new Request object from a sender certificate and a Tokio stream
     pub async fn from<I: AsyncBufRead + Unpin>(
         trust_store: PathBuf,
-        cert: CertificateDer<'_>,
+        cert: Option<CertificateDer<'_>>,
         stream: &mut I,
     ) -> Result<Self, RequestError> {
         let mut buf = String::new();
@@ -107,8 +107,12 @@ impl Message {
 
         // Empty messages won't be verified
         if request.message.len() > 0 {
-            let sender = Cert::verify(&cert, trust_store).await?;
-            request.sender = sender;
+            if let Some(inner) = cert {
+                let sender = Cert::verify(&inner, trust_store).await?;
+                request.sender = sender;
+            } else {
+                return Err(RequestError::CertificateRequired);
+            }
         }
 
         debug!("request received ({request})");

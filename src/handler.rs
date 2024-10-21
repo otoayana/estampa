@@ -23,8 +23,8 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                 .and_then(|v| v.get(0).map(|v| v.to_owned()));
             let mut buf = BufStream::new(stream);
 
-            let (status, message): (Status, Option<Message>) = if let Some(val) = certs {
-                match Message::from(memory.base.store.join("trust/"), val, &mut buf).await {
+            let (status, message): (Status, Option<Message>) =
+                match Message::from(memory.base.store.join("trust/"), certs, &mut buf).await {
                     Ok(msg) => (
                         match msg
                             .save(&memory.base.store, &memory.mailbox, &memory.base.host)
@@ -36,10 +36,7 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                         Some(msg),
                     ),
                     Err(err) => (err.into_response(), None),
-                }
-            } else {
-                (Status::CERTIFICATE_REQUIRED, None)
-            };
+                };
 
             match Response::from(status.clone()).write(&mut buf).await {
                 Ok(_) => {

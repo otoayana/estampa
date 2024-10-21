@@ -52,6 +52,9 @@ pub enum RequestError {
     #[error("bad mailbox certificate")]
     BadMailboxCertificate,
 
+    #[error("authentication required")]
+    CertificateRequired,
+
     // Parenthesis format is used, since this is only considered a "sub-error"
     #[error("(verification error) {0}")]
     Verification(#[from] VerificationError),
@@ -81,6 +84,7 @@ pub enum VerificationError {
 impl Responder for RequestError {
     fn into_response(&self) -> Status {
         match self {
+            Self::CertificateRequired => Status::CERTIFICATE_REQUIRED,
             Self::MailboxNotFound => Status::MAILBOX_DOESNT_EXIST,
             Self::DomainNotServiced => Status::DOMAIN_NOT_SERVICED,
             Self::MailboxDisabled => Status::MAILBOX_GONE,
