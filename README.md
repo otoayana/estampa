@@ -14,7 +14,7 @@ release.
 ```
 $ git clone https://git.sr.ht/~nixgoat/estampa
 $ cd estampa
-$ git checkout v0.1
+$ git checkout v0.1.2
 ```
 
 Build and install estampa using [`cargo`](https://rustup.rs/).
