@@ -23,12 +23,12 @@ Build and install estampa using [`cargo`](https://rustup.rs/).
 $ cargo install --path .
 ```
 
-Copy and rename `dist/config.example.toml` into `config.toml` within
+Copy and rename `contrib/config.example.toml` into `config.toml` within
 your working directory. Open it with your preferred text editor (in
 this example `hx` will be used).
 
 ```
-$ cp dist/config.example.toml config.toml
+$ cp contrib/config.example.toml config.toml
 $ hx config.toml
 ```
 
@@ -40,7 +40,7 @@ $ estampa
 
 Congrats! You should now have an estampa server fully up and running!
 It is highly recommended to run this as a system service. An example
-for a `systemd` service file is provided at `dist/estampa.service`.
+for a `systemd` service file is provided at `contrib/estampa.service`.
 
 ## Contributing
 
