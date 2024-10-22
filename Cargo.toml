@@ -1,6 +1,6 @@
 [package]
 name = "estampa"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 repository = "https://git.sr.ht/~nixgoat/estampa"
 authors = ["Lux Aliaga <me@lux.rip>"]
