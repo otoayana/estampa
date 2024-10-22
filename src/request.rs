@@ -178,7 +178,7 @@ impl Message {
         // Certificate fingerprints need to be sent in an octet format
         let mut fp_fmt = String::new();
         for oct in fingerprint {
-            fp_fmt.push_str(format!("{:x}", oct).as_str())
+            fp_fmt.push_str(format!("{:02x}", oct).as_str())
         }
 
         debug!(
