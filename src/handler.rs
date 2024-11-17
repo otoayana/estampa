@@ -1,6 +1,7 @@
 use crate::{
     config::Config,
-    error::Responder,
+    error::{RequestError, Responder},
+    protocol::{AsMessage, Protocol},
     request::Message,
     response::{Response, Status},
 };
@@ -23,20 +24,29 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                 .and_then(|v| v.first().map(|v| v.to_owned()));
             let mut buf = BufStream::new(stream);
 
-            let (status, message): (Status, Option<Message>) =
-                match Message::from(memory.base.store.join("trust/"), certs, &mut buf).await {
-                    Ok(msg) => (
-                        match msg
-                            .save(&memory.base.store, &memory.mailbox, &memory.base.host)
-                            .await
-                        {
-                            Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
-                            Err(err) => err.as_response(),
-                        },
-                        Some(msg),
-                    ),
-                    Err(err) => (err.as_response(), None),
-                };
+            let (status, message): (Status, Option<Message>) = match Protocol::parse(&mut buf).await
+            {
+                Ok(proto) => match proto {
+                    Protocol::MisfinB(req) => match req
+                        .as_message(certs, memory.base.store.join("trust/"))
+                        .await
+                    {
+                        Ok(msg) => (
+                            match msg
+                                .save(&memory.base.store, &memory.mailbox, &memory.base.host)
+                                .await
+                            {
+                                Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
+                                Err(err) => err.as_response(),
+                            },
+                            Some(msg),
+                        ),
+                        Err(err) => (err.as_response(), None),
+                    },
+                    _ => (RequestError::InvalidRequest.as_response(), None),
+                },
+                Err(err) => (err.as_response(), None),
+            };
 
             match Response::from(status.clone()).write(&mut buf).await {
                 Ok(_) => {

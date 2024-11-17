@@ -1,6 +1,7 @@
 mod config;
 mod error;
 mod handler;
+mod protocol;
 mod request;
 mod response;
 mod tls;
@@ -57,6 +58,7 @@ async fn main() -> Result<(), EstampaError> {
     let subscriber = tracing_subscriber::fmt()
         .compact()
         .with_target(false)
+        .with_max_level(tracing::Level::DEBUG)
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 

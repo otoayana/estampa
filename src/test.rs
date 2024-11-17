@@ -1,6 +1,7 @@
 use crate::{
     config::{Base, Config, Mailbox, Tls},
-    request::Message,
+    protocol::misfin_b::Request,
+    request::{Identity, Message},
     tls::Cert,
 };
 use std::{collections::HashMap, fs, io::BufReader, path::PathBuf, str::FromStr, sync::Arc};
@@ -11,7 +12,7 @@ use tokio_rustls::{
     TlsAcceptor,
 };
 
-const MESSAGE_BODY: &'static str = "misfin://skye@localhost Hi there!\r\n";
+const MESSAGE_BODY: &'static str = "misfin://skye@localhost Hi there!";
 
 #[tokio::test]
 async fn initialize_store() {
@@ -258,7 +259,7 @@ async fn verify_certificate() {
 
 #[tokio::test]
 async fn parse_b_request() {
-    let message = Message::from_str(MESSAGE_BODY);
+    let message = Request::from_str(MESSAGE_BODY);
 
     assert!(
         message.is_ok(),
@@ -267,12 +268,9 @@ async fn parse_b_request() {
 
     let message = message.unwrap();
 
+    assert_eq!(message.mailbox, "skye", "unexpected value in mailbox field",);
     assert_eq!(
-        message.recipient.mailbox, "skye",
-        "unexpected value in mailbox field",
-    );
-    assert_eq!(
-        message.recipient.hostname, "localhost",
+        message.hostname, "localhost",
         "unexpected value in hostname field",
     );
     assert_eq!(
@@ -364,7 +362,15 @@ async fn store_b_request() {
         acceptor.accept(&mut socket).await.unwrap();
     });
 
-    let message = Message::from_str(MESSAGE_BODY).unwrap();
+    let identity = Identity {
+        mailbox: "skye".to_string(),
+        hostname: "localhost".to_string(),
+    };
+    let message = Message {
+        sender: identity.clone(),
+        recipient: identity.clone(),
+        message: "Hi there!".to_string(),
+    };
     let save = message
         .save(&config.base.store, &config.mailbox, "localhost")
         .await;
