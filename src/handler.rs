@@ -43,6 +43,22 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                         ),
                         Err(err) => (err.as_response(), None),
                     },
+                    Protocol::MisfinC(req) => match req
+                        .as_message(certs, memory.base.store.join("trust/"))
+                        .await
+                    {
+                        Ok(msg) => (
+                            match msg
+                                .save(&memory.base.store, &memory.mailbox, &memory.base.host)
+                                .await
+                            {
+                                Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
+                                Err(err) => err.as_response(),
+                            },
+                            Some(msg),
+                        ),
+                        Err(err) => (err.as_response(), None),
+                    },
                     _ => (RequestError::InvalidRequest.as_response(), None),
                 },
                 Err(err) => (err.as_response(), None),

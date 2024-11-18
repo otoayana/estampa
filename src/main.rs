@@ -47,6 +47,7 @@ struct Cli {
 }
 
 #[tokio::main]
+#[tracing::instrument(err)]
 async fn main() -> Result<(), EstampaError> {
     let args = Cli::parse();
     let conf = Config::open(
