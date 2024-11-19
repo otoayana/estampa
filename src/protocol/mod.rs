@@ -30,15 +30,20 @@ impl Protocol {
     pub async fn parse<I: AsyncBufRead + Unpin>(stream: &mut I) -> Result<Self, RequestError> {
         let mut buffer: Vec<u8> = Vec::new();
         stream.read_until(0x0d, &mut buffer).await?;
-
-        if buffer.len() > 2048 {
-            return Err(RequestError::MaxSizeExceeded);
-        }
-
-        let buffer_string = String::from_utf8(buffer).map_err(|_| RequestError::InvalidRequest)?;
+        let buffer_string =
+            String::from_utf8(buffer.clone()).map_err(|_| RequestError::InvalidRequest)?;
 
         if let Ok(message) = misfin_b::Request::from_str(&buffer_string) {
+            if buffer.len() > 2048 {
+                return Err(RequestError::MaxSizeExceeded);
+            }
+
             return Ok(Self::MisfinB(message));
+        }
+
+        // Any other protocols require their header piece to be 1024 bytes at most.
+        if buffer.len() > 1024 {
+            return Err(RequestError::MaxSizeExceeded);
         }
 
         if let Ok(mut message) = misfin_c::Request::from_str(&buffer_string) {
