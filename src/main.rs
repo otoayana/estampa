@@ -1,9 +1,8 @@
 mod config;
 mod error;
 mod handler;
+mod mailbox;
 mod protocol;
-mod request;
-mod response;
 mod tls;
 
 #[cfg(test)]

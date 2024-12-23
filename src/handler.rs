@@ -1,9 +1,11 @@
 use crate::{
     config::Config,
     error::{RequestError, Responder},
-    protocol::{AsMessage, Protocol},
-    request::Message,
-    response::{Response, Status},
+    mailbox::Message,
+    protocol::{
+        misfin::{Response, Status},
+        AsMessage, Protocol,
+    },
 };
 use std::sync::Arc;
 use tokio::{

@@ -1,4 +1,4 @@
-use crate::response::Status;
+use crate::protocol::misfin::Status;
 use thiserror::Error;
 
 pub trait Responder {

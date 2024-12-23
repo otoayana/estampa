@@ -1,7 +1,8 @@
-pub mod misfin_b;
-pub mod misfin_c;
+pub mod gmap;
+pub mod misfin;
 
-use crate::error::RequestError;
+use crate::{error::RequestError, mailbox::Message};
+use misfin::{b, c9};
 use std::{path::PathBuf, str::FromStr};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use tokio_rustls::rustls::pki_types::CertificateDer;
@@ -9,10 +10,11 @@ use tracing::debug;
 
 #[derive(Debug)]
 pub enum Protocol {
-    MisfinB(misfin_b::Request),
-    MisfinC(misfin_c::Request),
+    MisfinB(b::Request),
+    MisfinC(c9::Request),
     // TODO(otoayana): implement GMAP support
-    _GMAP,
+    #[allow(dead_code)]
+    GMAP(gmap::Request),
 }
 
 pub trait AsMessage {
@@ -22,7 +24,7 @@ pub trait AsMessage {
         &self,
         cert: Option<CertificateDer<'_>>,
         trust: PathBuf,
-    ) -> Result<crate::request::Message, Self::Err>;
+    ) -> Result<Message, Self::Err>;
 }
 
 impl Protocol {
@@ -33,7 +35,7 @@ impl Protocol {
         let buffer_string =
             String::from_utf8(buffer.clone()).map_err(|_| RequestError::InvalidRequest)?;
 
-        if let Ok(message) = misfin_b::Request::from_str(&buffer_string) {
+        if let Ok(message) = b::Request::from_str(&buffer_string) {
             if buffer.len() > 2048 {
                 return Err(RequestError::MaxSizeExceeded);
             }
@@ -46,7 +48,7 @@ impl Protocol {
             return Err(RequestError::MaxSizeExceeded);
         }
 
-        if let Ok(mut message) = misfin_c::Request::from_str(&buffer_string) {
+        if let Ok(mut message) = c9::Request::from_str(&buffer_string) {
             if message.content_length > 16384 {
                 return Err(RequestError::MaxSizeExceeded);
             }

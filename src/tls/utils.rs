@@ -1,7 +1,7 @@
 use crate::{
     config::Mailbox,
     error::{EstampaError, VerificationError},
-    request::Identity,
+    mailbox::Identity,
     tls::auth::EstampaServerAuth,
 };
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};

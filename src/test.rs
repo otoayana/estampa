@@ -1,7 +1,7 @@
 use crate::{
     config::{Base, Config, Mailbox, Tls},
-    protocol::misfin_b::Request,
-    request::{Identity, Message},
+    mailbox::{Identity, Message},
+    protocol::misfin::b::Request,
     tls::Cert,
 };
 use std::{collections::HashMap, fs, io::BufReader, path::PathBuf, str::FromStr, sync::Arc};

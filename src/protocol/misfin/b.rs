@@ -1,9 +1,9 @@
 use tokio_rustls::rustls::pki_types::CertificateDer;
 
-use super::AsMessage;
 use crate::{
     error::RequestError,
-    request::{Identity, Message},
+    mailbox::{Identity, Message},
+    protocol::AsMessage,
     tls::Cert,
 };
 use std::{path::PathBuf, str::FromStr};
@@ -46,7 +46,7 @@ impl AsMessage for Request {
         &self,
         cert: Option<CertificateDer<'_>>,
         trust: PathBuf,
-    ) -> Result<crate::request::Message, Self::Err> {
+    ) -> Result<crate::mailbox::Message, Self::Err> {
         let mut message = Message {
             sender: Identity {
                 mailbox: String::new(),
