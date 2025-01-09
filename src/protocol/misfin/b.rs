@@ -56,7 +56,7 @@ impl AsMessage for Request {
                 mailbox: self.mailbox.clone(),
                 hostname: self.hostname.clone(),
             },
-            message: String::new(),
+            message: self.message.clone(),
         };
 
         if !self.message.trim().is_empty() {

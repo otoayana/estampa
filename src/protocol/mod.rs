@@ -36,6 +36,7 @@ impl Protocol {
             String::from_utf8(buffer.clone()).map_err(|_| RequestError::InvalidRequest)?;
 
         if let Ok(message) = b::Request::from_str(&buffer_string) {
+            debug!("request identified as misfin(b)");
             if buffer.len() > 2048 {
                 return Err(RequestError::MaxSizeExceeded);
             }
@@ -49,6 +50,7 @@ impl Protocol {
         }
 
         if let Ok(mut message) = c9::Request::from_str(&buffer_string) {
+            debug!("request identified as misfin(c9)");
             if message.content_length > 16384 {
                 return Err(RequestError::MaxSizeExceeded);
             }
