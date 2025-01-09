@@ -1,7 +1,10 @@
 use crate::error::EstampaError;
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
-use tokio::fs;
+use tokio::{
+    fs::{self, File},
+    io::AsyncWriteExt,
+};
 use tracing::info;
 
 #[derive(Debug, Deserialize)]
@@ -70,6 +73,15 @@ impl Config {
                     created = true
                 }
             }
+        }
+
+        // Creates the version file, and writes the store version to it
+        let version_path = self.base.store.clone().join(".version");
+
+        // TODO(otoayana): write migration handling
+        if !version_path.exists() {
+            let mut version = File::create(&version_path).await?;
+            version.write_all("2".as_bytes()).await?;
         }
 
         if created {

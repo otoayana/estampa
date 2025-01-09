@@ -67,9 +67,14 @@ impl Message {
                 .unwrap_or(Duration::new(0, 0))
                 .as_millis();
 
+            // Creates a BLAKE3 hash for the message ID
+            let id = blake3::hash(format!("{}{}", time, self.sender).into_bytes().as_slice());
+            debug!("message id: {}", id.to_string());
+
             let path = store.join(format!(
-                "mbox/{}/{}-{}.gmi",
-                self.recipient.mailbox, time, self.sender
+                "mbox/{}/{}.msfn",
+                self.recipient.mailbox,
+                id.to_string()
             ));
 
             let mut file = File::create(path)?;
