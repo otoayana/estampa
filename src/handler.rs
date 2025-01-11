@@ -34,11 +34,11 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                         .await
                     {
                         Ok(msg) => (
-                            match msg
-                                .save(&memory.base.store, &memory.mailbox, &memory.base.host)
-                                .await
-                            {
-                                Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
+                            match memory.mailbox(msg.recipient.clone()) {
+                                Ok(mbox) => match mbox.save(msg.clone()) {
+                                    Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
+                                    Err(err) => err.as_response(),
+                                },
                                 Err(err) => err.as_response(),
                             },
                             Some(msg),
@@ -50,11 +50,11 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                         .await
                     {
                         Ok(msg) => (
-                            match msg
-                                .save(&memory.base.store, &memory.mailbox, &memory.base.host)
-                                .await
-                            {
-                                Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
+                            match memory.mailbox(msg.recipient.clone()) {
+                                Ok(mbox) => match mbox.save(msg.clone()) {
+                                    Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
+                                    Err(err) => err.as_response(),
+                                },
                                 Err(err) => err.as_response(),
                             },
                             Some(msg),

@@ -1,27 +1,33 @@
-use crate::config::Mailbox;
 use crate::error::RequestError;
 use sha2::{Digest, Sha256};
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::PathBuf;
 use std::{
-    collections::HashMap,
     fmt::Display,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tracing::{debug, error};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Identity {
     pub mailbox: String,
     pub hostname: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Message {
     pub sender: Identity,
     pub recipient: Identity,
     pub message: String,
+}
+
+#[derive(Debug)]
+pub struct Mailbox<'a> {
+    pub owner: Identity,
+    pub path: PathBuf,
+    pub cert: PathBuf,
+    pub tags: Vec<&'a str>,
 }
 
 impl Display for Identity {
@@ -40,27 +46,10 @@ impl Display for Message {
     }
 }
 
-impl Message {
-    /// Stores the message created in the request to the filesystem
-    pub async fn save<'a>(
-        &self,
-        store: &Path,
-        available_mailboxes: &HashMap<String, Mailbox>,
-        hostname: &'a str,
-    ) -> Result<String, RequestError> {
-        let mailbox = available_mailboxes
-            .get(&self.recipient.mailbox)
-            .ok_or(RequestError::MailboxNotFound)?;
-
-        if self.recipient.hostname != hostname {
-            return Err(RequestError::DomainNotServiced);
-        }
-
-        if !mailbox.enabled {
-            return Err(RequestError::MailboxDisabled);
-        }
-
-        if !self.message.trim().is_empty() {
+impl Mailbox<'_> {
+    /// Saves provided message into the mailbox
+    pub fn save(&self, message: Message) -> Result<String, RequestError> {
+        if !message.message.trim().is_empty() {
             let now = SystemTime::now();
             let time = now
                 .duration_since(UNIX_EPOCH)
@@ -68,25 +57,24 @@ impl Message {
                 .as_millis();
 
             // Creates a BLAKE3 hash for the message ID
-            let id = blake3::hash(format!("{}{}", time, self.sender).into_bytes().as_slice());
+            let id = blake3::hash(
+                format!("{}{}", time, message.sender)
+                    .into_bytes()
+                    .as_slice(),
+            );
             debug!("message id: {}", id.to_string());
 
-            let path = store.join(format!(
-                "mbox/{}/{}.msfn",
-                self.recipient.mailbox,
-                id.to_string()
-            ));
+            let path = self.path.clone().join(format!("{}.msfn", id.to_string()));
 
             let mut file = File::create(path)?;
-            file.write_all(self.message.as_bytes())?;
+            file.write_all(message.message.as_bytes())?;
         }
 
         // Certificate is read to respond with a fingerprint
-        let mut cert_file =
-            File::open(store.join(format!("certs/{}.pem", self.recipient.mailbox)))?;
+        let mut cert_file = File::open(self.cert.clone())?;
         let mut cert_buf: Vec<u8> = vec![];
 
-        debug!("opening certificate for mailbox {}", self.recipient.mailbox);
+        debug!("opening certificate for mailbox {}", self.owner.mailbox);
 
         cert_file.read_to_end(&mut cert_buf)?;
 
@@ -95,7 +83,7 @@ impl Message {
         let pem = pem::parse(&cert_buf).map_err(|err| {
             error!(
                 "certificate invalid for local mailbox {}: {err}",
-                self.recipient.mailbox
+                self.owner.mailbox
             );
             RequestError::BadMailboxCertificate
         })?;
@@ -112,9 +100,130 @@ impl Message {
 
         debug!(
             "fingerprint for mailbox {} is {}",
-            &self.recipient.mailbox, &fp_fmt
+            self.owner.mailbox, &fp_fmt
         );
 
         Ok(fp_fmt)
+    }
+
+    /// Fetches a message from a mailbox by its ID
+    pub fn get<'a>(&self, id: &'a str) -> Result<Message, RequestError> {
+        let message_path = self.path.join(format!("{}.msfn", id));
+        let mut message_file = File::open(message_path)?;
+        let mut message = String::new();
+
+        message_file.read_to_string(&mut message)?;
+
+        Ok(Message {
+            sender: Identity::default(),
+            recipient: self.owner.clone(),
+            message,
+        })
+    }
+
+    /// Lists either all messages, or messages contained in a tag
+    pub fn list<'a>(&self, tag: Option<&'a str>) -> Result<Vec<String>, RequestError> {
+        let messages = if let Some(tag) = tag {
+            // Handles listing messages contained in a tag
+            if !self.tags.contains(&tag) {
+                // TODO: create custom error for missing tag
+                return Err(RequestError::InvalidRequest);
+            }
+
+            let tag_path = self.path.join(format!(".{}", tag));
+            let mut tag_file =
+                File::open(tag_path.clone()).or_else(|_| File::create(tag_path.clone()))?;
+            let mut tag_contents = String::new();
+
+            tag_file.read_to_string(&mut tag_contents)?;
+
+            // Iterate over each line, in order to convert them to strings
+            tag_contents
+                .lines()
+                .map(|l| l.to_string())
+                .collect::<Vec<String>>()
+        } else {
+            // Handles listing all messages
+            let files = fs::read_dir(self.path.clone())?.flatten();
+            let mut file_list: Vec<String> = vec![];
+
+            for file in files {
+                // TODO: handle failed string convertion
+                let name = file
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| RequestError::InvalidRequest)?;
+
+                if name.ends_with(".msfn") {
+                    file_list.push(name.to_string());
+                }
+            }
+
+            file_list
+        };
+
+        Ok(messages)
+    }
+
+    /// Toggles a tag for a message
+    pub fn tag<'a>(&self, id: &'a str, tag: &'a str) -> Result<(), RequestError> {
+        if !self.tags.contains(&tag) {
+            // TODO: create custom error for missing tag
+            return Err(RequestError::InvalidRequest);
+        }
+
+        if !self.path.join(format!("{}.msfn", tag)).exists() {
+            // TODO: create custom error for missing message
+            return Err(RequestError::InvalidRequest);
+        }
+
+        // Reads tag to inspect if the ID is present in it
+        let tag_path = self.path.join(format!(".{}", tag));
+        let mut tag_file = File::open(tag_path.clone())?;
+        let mut tag_contents = String::new();
+        tag_file.read_to_string(&mut tag_contents)?;
+
+        let mut common_tag_opts = OpenOptions::new();
+        common_tag_opts.write(true).create(true);
+
+        if tag_contents.contains(id) {
+            // Remove message ID from tag
+            let mut tag_mod = common_tag_opts
+                .clone()
+                .truncate(true)
+                .open(tag_path.clone())?;
+
+            tag_mod.write_all(
+                tag_contents
+                    .lines()
+                    .filter(|l| l != &id)
+                    .collect::<String>()
+                    .as_bytes(),
+            )?;
+        } else {
+            // Add message ID to tag
+            let mut tag_mod = common_tag_opts
+                .clone()
+                .append(true)
+                .open(tag_path.clone())?;
+            tag_mod.write_all(id.as_bytes())?;
+        }
+
+        Ok(())
+    }
+
+    /// Deletes a message if it's present in the Trash tag
+    pub fn delete<'a>(&self, id: &'a str) -> Result<(), RequestError> {
+        let messages = self.list(Some("Trash"))?;
+
+        if messages.contains(&id.to_string()) {
+            self.tag(id, "Trash")?;
+            fs::remove_file(self.path.join(format!("{}.msfn", id)))?;
+        } else {
+            // TODO: create error for missing message
+            return Err(RequestError::InvalidRequest);
+        }
+
+        Ok(())
     }
 }

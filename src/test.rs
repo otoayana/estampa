@@ -371,9 +371,9 @@ async fn store_b_request() {
         recipient: identity.clone(),
         message: "Hi there!".to_string(),
     };
-    let save = message
-        .save(&config.base.store, &config.mailbox, "localhost")
-        .await;
+
+    let mailbox = config.mailbox(identity).unwrap();
+    let save = mailbox.save(message);
 
     assert!(save.is_ok(), "message failed to save: ({save:#?})");
 

@@ -1,4 +1,7 @@
-use crate::error::EstampaError;
+use crate::{
+    error::{EstampaError, RequestError},
+    mailbox::{self, Identity},
+};
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 use tokio::{
@@ -34,6 +37,7 @@ pub struct Mailbox {
 }
 
 pub static STORE_TREE: [&str; 4] = ["certs/", "certs/priv/", "trust/", "mbox/"];
+pub static DEFAULT_TAGS: [&str; 6] = ["Inbox", "Archive", "Sent", "Drafts", "Trash", "Unread"];
 
 impl Config {
     /// Loads and parses an estampa config file
@@ -89,5 +93,37 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    /// Finds a mailbox within the config, and constructs a mailbox type
+    pub fn mailbox(&self, identity: Identity) -> Result<mailbox::Mailbox, RequestError> {
+        if identity.hostname != self.base.host {
+            return Err(RequestError::DomainNotServiced);
+        }
+
+        let mbox_conf = self
+            .mailbox
+            .get(&identity.mailbox)
+            .ok_or(RequestError::MailboxNotFound)?;
+
+        if !mbox_conf.enabled {
+            return Err(RequestError::MailboxDisabled);
+        }
+
+        let mut tags = vec![];
+
+        for tag in DEFAULT_TAGS {
+            tags.push(tag);
+        }
+
+        Ok(mailbox::Mailbox {
+            owner: identity.clone(),
+            path: self.base.store.join(format!("mbox/{}", identity.mailbox)),
+            cert: self
+                .base
+                .store
+                .join(format!("certs/{}.pem", identity.mailbox)),
+            tags,
+        })
     }
 }
