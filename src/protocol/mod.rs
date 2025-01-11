@@ -1,7 +1,10 @@
 pub mod gmap;
 pub mod misfin;
 
-use crate::{error::RequestError, mailbox::Message};
+use crate::{
+    error::{RequestError, Responder},
+    mailbox::Message,
+};
 use misfin::{b, c9};
 use std::{path::PathBuf, str::FromStr};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
@@ -18,7 +21,7 @@ pub enum Protocol {
 }
 
 pub trait AsMessage {
-    type Err;
+    type Err: Responder;
 
     async fn as_message(
         &self,

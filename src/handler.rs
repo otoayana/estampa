@@ -29,38 +29,8 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
             let (status, message): (Status, Option<Message>) = match Protocol::parse(&mut buf).await
             {
                 Ok(proto) => match proto {
-                    Protocol::MisfinB(req) => match req
-                        .as_message(certs, memory.base.store.join("trust/"))
-                        .await
-                    {
-                        Ok(msg) => (
-                            match memory.mailbox(msg.recipient.clone()) {
-                                Ok(mbox) => match mbox.save(msg.clone()) {
-                                    Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
-                                    Err(err) => err.as_response(),
-                                },
-                                Err(err) => err.as_response(),
-                            },
-                            Some(msg),
-                        ),
-                        Err(err) => (err.as_response(), None),
-                    },
-                    Protocol::MisfinC(req) => match req
-                        .as_message(certs, memory.base.store.join("trust/"))
-                        .await
-                    {
-                        Ok(msg) => (
-                            match memory.mailbox(msg.recipient.clone()) {
-                                Ok(mbox) => match mbox.save(msg.clone()) {
-                                    Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
-                                    Err(err) => err.as_response(),
-                                },
-                                Err(err) => err.as_response(),
-                            },
-                            Some(msg),
-                        ),
-                        Err(err) => (err.as_response(), None),
-                    },
+                    Protocol::MisfinB(req) => misfin_handler(req, certs, memory).await,
+                    Protocol::MisfinC(req) => misfin_handler(req, certs, memory).await,
                     _ => (RequestError::InvalidRequest.as_response(), None),
                 },
                 Err(err) => (err.as_response(), None),
@@ -85,5 +55,29 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
             };
         }
         Err(err) => error!("connection error ({err})"),
+    }
+}
+
+/// Stores Misfin messages, regardless of version
+async fn misfin_handler(
+    request: impl AsMessage,
+    cert: Option<CertificateDer<'_>>,
+    memory: Arc<Config>,
+) -> (Status, Option<Message>) {
+    match request
+        .as_message(cert, memory.base.store.join("trust/"))
+        .await
+    {
+        Ok(msg) => (
+            match memory.mailbox(msg.recipient.clone()) {
+                Ok(mbox) => match mbox.save(msg.clone()) {
+                    Ok(fingerprint) => Status::MESSAGE_DELIVERED(fingerprint),
+                    Err(err) => err.as_response(),
+                },
+                Err(err) => err.as_response(),
+            },
+            Some(msg),
+        ),
+        Err(err) => (err.as_response(), None),
     }
 }
