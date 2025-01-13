@@ -2,17 +2,17 @@ pub mod gmap;
 pub mod misfin;
 
 use crate::{
-    error::{RequestError, Responder},
+    error::{EstampaError, RequestError, Responder},
     mailbox::Message,
 };
 use misfin::{b, c9};
-use std::{path::PathBuf, str::FromStr};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt};
+use std::{fmt::Display, path::PathBuf, str::FromStr};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite};
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use tracing::debug;
 
 #[derive(Debug)]
-pub enum Protocol {
+pub enum Request {
     MisfinB(b::Request),
     MisfinC(c9::Request),
     // TODO(otoayana): implement GMAP support
@@ -30,7 +30,7 @@ pub trait AsMessage {
     ) -> Result<Message, Self::Err>;
 }
 
-impl Protocol {
+impl Request {
     /// Parses and identifies a request
     pub async fn parse<I: AsyncBufRead + Unpin>(stream: &mut I) -> Result<Self, RequestError> {
         let mut buffer: Vec<u8> = Vec::new();
@@ -38,8 +38,11 @@ impl Protocol {
         let buffer_string =
             String::from_utf8(buffer.clone()).map_err(|_| RequestError::InvalidRequest)?;
 
+        debug!("buffer contents: {}", &buffer_string);
+
         if let Ok(message) = b::Request::from_str(&buffer_string) {
             debug!("request identified as misfin(b)");
+
             if buffer.len() > 2048 {
                 return Err(RequestError::MaxSizeExceeded);
             }
@@ -83,8 +86,41 @@ impl Protocol {
             return Ok(Self::MisfinC(message));
         }
 
+        if let Ok(request) = gmap::Request::from_str(&buffer_string) {
+            debug!("request identified as gmap");
+            return Ok(Self::GMAP(request));
+        }
+
         debug!("unknown request");
 
         Err(RequestError::InvalidRequest)
+    }
+}
+
+#[derive(Debug)]
+pub enum Response {
+    Misfin(misfin::Response),
+    GMAP(gmap::Response),
+}
+
+impl Response {
+    pub async fn write<O: AsyncWrite + Unpin>(&self, stream: &mut O) -> Result<(), EstampaError> {
+        match self {
+            Self::Misfin(res) => res.write(stream).await,
+            Self::GMAP(res) => res.write(stream).await,
+        }
+    }
+}
+
+impl Display for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Response::Misfin(inner) => format!("{}", inner),
+                Response::GMAP(inner) => format!("{}", inner),
+            }
+        )
     }
 }

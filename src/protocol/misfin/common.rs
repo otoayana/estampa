@@ -5,7 +5,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 #[allow(non_camel_case_types)]
-pub enum Status {
+pub enum Response {
     MESSAGE_DELIVERED(String),
     SEND_HERE_INSTEAD(String),
     SEND_HERE_FOREVER(String),
@@ -27,12 +27,7 @@ pub enum Status {
     PROVE_IT,
 }
 
-#[derive(Debug)]
-pub struct Response {
-    status: Status,
-}
-
-impl Status {
+impl Response {
     pub fn as_u8(&self) -> u8 {
         match self {
             Self::MESSAGE_DELIVERED(_) => 20,
@@ -58,7 +53,7 @@ impl Status {
     }
 }
 
-impl Display for Status {
+impl Display for Response {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -75,12 +70,8 @@ impl Display for Status {
 }
 
 impl Response {
-    pub fn from(status: Status) -> Response {
-        Response { status }
-    }
-
     pub async fn write<O: AsyncWrite + Unpin>(&self, stream: &mut O) -> Result<(), EstampaError> {
-        let response = format!("{}\r\n", self.status).into_bytes();
+        let response = format!("{}\r\n", self).into_bytes();
 
         stream.write_all(&response).await?;
         stream.flush().await?;

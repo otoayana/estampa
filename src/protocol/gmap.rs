@@ -1,5 +1,5 @@
 use crate::error::{EstampaError, RequestError};
-use std::str::FromStr;
+use std::{fmt::Display, str::FromStr};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 #[allow(dead_code)]
@@ -20,7 +20,7 @@ impl FromStr for Request {
 
         Ok(Request {
             host: host.to_string(),
-            path: path.to_string(),
+            path: path.trim().to_string(),
         })
     }
 }
@@ -28,31 +28,52 @@ impl FromStr for Request {
 #[derive(Debug)]
 #[allow(dead_code)]
 #[allow(non_camel_case_types)]
-pub enum Status {
+pub enum Response {
     SUCCESS((String, Vec<u8>)),
-    NOT_FOUND(String),
-    INTERNAL_SERVER_ERROR(String),
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct Response {
-    pub status: u8,
-    pub content: Vec<u8>,
+    NOT_FOUND,
+    INTERNAL_SERVER_ERROR,
+    CERTIFICATE_REQUIERED,
 }
 
 #[allow(dead_code)]
 impl Response {
     pub async fn write<O: AsyncWrite + Unpin>(&self, stream: &mut O) -> Result<(), EstampaError> {
-        let mut response = format!("{} ", self.status).into_bytes();
+        let mut response = format!("{} ", self).into_bytes();
 
-        for byte in self.content.clone().iter() {
-            response.push(*byte);
+        if let Response::SUCCESS((mime, _)) = self {
+            for byte in mime.clone().into_bytes() {
+                response.push(byte);
+            }
+        }
+
+        for byte in "\r\n".as_bytes() {
+            response.push(*byte)
+        }
+
+        if let Response::SUCCESS((_, data)) = self {
+            for byte in data.clone().iter() {
+                response.push(*byte);
+            }
         }
 
         stream.write_all(&response).await?;
         stream.flush().await?;
 
         Ok(())
+    }
+}
+
+impl Display for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Response::SUCCESS(_) => 20,
+                Response::NOT_FOUND => 51,
+                Response::INTERNAL_SERVER_ERROR => 41,
+                Response::CERTIFICATE_REQUIERED => 60,
+            }
+        )
     }
 }

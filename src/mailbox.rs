@@ -109,6 +109,7 @@ impl Mailbox<'_> {
     /// Fetches a message from a mailbox by its ID
     pub fn get<'a>(&self, id: &'a str) -> Result<Message, RequestError> {
         let message_path = self.path.join(format!("{}.msfn", id));
+        debug!("message path: {:?}", &message_path);
         let mut message_file = File::open(message_path)?;
         let mut message = String::new();
 
@@ -155,7 +156,7 @@ impl Mailbox<'_> {
                     .map_err(|_| RequestError::InvalidRequest)?;
 
                 if name.ends_with(".msfn") {
-                    file_list.push(name.to_string());
+                    file_list.push(name.trim_end_matches(".msfn").to_string());
                 }
             }
 
@@ -166,6 +167,7 @@ impl Mailbox<'_> {
     }
 
     /// Toggles a tag for a message
+    #[allow(dead_code)]
     pub fn tag<'a>(&self, id: &'a str, tag: &'a str) -> Result<(), RequestError> {
         if !self.tags.contains(&tag) {
             // TODO: create custom error for missing tag
@@ -213,6 +215,7 @@ impl Mailbox<'_> {
     }
 
     /// Deletes a message if it's present in the Trash tag
+    #[allow(dead_code)]
     pub fn delete<'a>(&self, id: &'a str) -> Result<(), RequestError> {
         let messages = self.list(Some("Trash"))?;
 

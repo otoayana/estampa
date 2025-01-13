@@ -117,11 +117,7 @@ impl Cert {
         Ok(())
     }
 
-    /// Parse a client certificate and validate its origin
-    pub async fn verify<'a>(
-        cert: &CertificateDer<'a>,
-        trust_path: PathBuf,
-    ) -> Result<Identity, VerificationError> {
+    pub async fn parse<'a>(cert: &CertificateDer<'a>) -> Result<Identity, VerificationError> {
         let parsed = X509Certificate::from_der(cert)
             .map_err(|_| VerificationError::InvalidCertificate)?
             .1;
@@ -148,9 +144,27 @@ impl Cert {
             .map_err(|_| VerificationError::InvalidCertificate)?
             .as_str()?;
 
-        debug!("sender certificate parsed ({}@{})", &uid, hostname);
+        Ok(Identity {
+            mailbox: uid.to_string(),
+            hostname: hostname.to_string(),
+        })
+    }
 
-        let local_cert_path = trust_path.join(format!("{}.spki", hostname));
+    /// Parse a client certificate and validate its origin
+    pub async fn verify<'a>(
+        cert: &CertificateDer<'a>,
+        trust_path: PathBuf,
+    ) -> Result<Identity, VerificationError> {
+        let certificate_der = cert.clone();
+        let parsed = X509Certificate::from_der(&certificate_der)
+            .map_err(|_| VerificationError::InvalidCertificate)?
+            .1;
+
+        let identity = Self::parse(cert).await?;
+
+        debug!("sender certificate parsed ({identity})");
+
+        let local_cert_path = trust_path.join(format!("{}.spki", identity.hostname.clone()));
 
         let spki = if local_cert_path.exists() {
             let mut raw: Vec<u8> = vec![];
@@ -163,7 +177,7 @@ impl Cert {
             SubjectPublicKeyInfoDer::from(raw)
         } else {
             // Fetch and verify the certificate from the client's SAN
-            let address = format!("{}:1958", hostname);
+            let address = format!("{}:1958", identity.hostname.clone());
 
             let config = ClientConfig::builder()
                 .dangerous()
@@ -173,7 +187,7 @@ impl Cert {
 
             let raw_stream = TcpStream::connect(address).await?;
 
-            let tls_hostname = ServerName::try_from(hostname.to_string())
+            let tls_hostname = ServerName::try_from(identity.hostname.clone())
                 .map_err(|_| VerificationError::InvalidHostname)?;
             let stream = connector.connect(tls_hostname, raw_stream).await?;
 
@@ -213,9 +227,6 @@ impl Cert {
 
         debug!("sender certificate is valid");
 
-        Ok(Identity {
-            mailbox: uid.to_string(),
-            hostname: hostname.to_string(),
-        })
+        Ok(identity)
     }
 }

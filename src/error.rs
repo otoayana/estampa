@@ -1,8 +1,13 @@
-use crate::protocol::misfin::Status;
+use crate::protocol::{gmap, misfin};
 use thiserror::Error;
 
+pub struct UniversalResponse {
+    pub misfin: misfin::Response,
+    pub gmap: gmap::Response,
+}
+
 pub trait Responder {
-    fn as_response(&self) -> Status;
+    fn as_response(&self) -> UniversalResponse;
 }
 
 #[derive(Error, Debug)]
@@ -82,26 +87,32 @@ pub enum VerificationError {
 }
 
 impl Responder for RequestError {
-    fn as_response(&self) -> Status {
-        match self {
-            Self::CertificateRequired => Status::CERTIFICATE_REQUIRED,
-            Self::MailboxNotFound => Status::MAILBOX_DOESNT_EXIST,
-            Self::DomainNotServiced => Status::DOMAIN_NOT_SERVICED,
-            Self::MailboxDisabled => Status::MAILBOX_GONE,
-            Self::BadMailboxCertificate => Status::PERMANENT_ERROR,
-            Self::MaxSizeExceeded | Self::InvalidRequest => Status::BAD_REQUEST,
-            Self::IO(_) => Status::PERMANENT_ERROR,
-            Self::Verification(inner) => inner.as_response(),
+    fn as_response(&self) -> UniversalResponse {
+        UniversalResponse {
+            misfin: match self {
+                Self::CertificateRequired => misfin::Response::CERTIFICATE_REQUIRED,
+                Self::MailboxNotFound => misfin::Response::MAILBOX_DOESNT_EXIST,
+                Self::DomainNotServiced => misfin::Response::DOMAIN_NOT_SERVICED,
+                Self::MailboxDisabled => misfin::Response::MAILBOX_GONE,
+                Self::BadMailboxCertificate => misfin::Response::PERMANENT_ERROR,
+                Self::MaxSizeExceeded | Self::InvalidRequest => misfin::Response::BAD_REQUEST,
+                Self::IO(_) => misfin::Response::PERMANENT_ERROR,
+                Self::Verification(inner) => inner.as_response().misfin,
+            },
+            gmap: gmap::Response::INTERNAL_SERVER_ERROR,
         }
     }
 }
 
 impl Responder for VerificationError {
-    fn as_response(&self) -> Status {
-        match self {
-            Self::InvalidCertificate => Status::CERTIFICATE_INVALID,
-            Self::InvalidSignature | Self::InvalidHostname => Status::YOURE_A_LIAR,
-            _ => Status::PERMANENT_ERROR,
+    fn as_response(&self) -> UniversalResponse {
+        UniversalResponse {
+            misfin: match self {
+                Self::InvalidCertificate => misfin::Response::CERTIFICATE_INVALID,
+                Self::InvalidSignature | Self::InvalidHostname => misfin::Response::YOURE_A_LIAR,
+                _ => misfin::Response::PERMANENT_ERROR,
+            },
+            gmap: gmap::Response::INTERNAL_SERVER_ERROR,
         }
     }
 }
