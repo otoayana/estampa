@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    error::Responder,
+    error::{RequestError, Responder},
     mailbox::Message,
     protocol::{gmap, misfin, AsMessage, Request, Response},
     tls::Cert,
@@ -22,84 +22,76 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                 .1
                 .peer_certificates()
                 .and_then(|v| v.first().map(|v| v.to_owned()));
+
             let mut buf = BufStream::new(stream);
 
-            let (response, message, path): (Response, Option<Message>, Option<String>) =
-                match Request::parse(&mut buf).await {
-                    Ok(proto) => match proto {
-                        Request::MisfinB(req) => misfin_handler(req, certs, memory).await,
-                        Request::MisfinC(req) => misfin_handler(req, certs, memory).await,
-                        Request::GMAP(req) => {
-                            let mut host = memory.base.host.clone();
-                            host.push_str(":1958");
+            let (response, message, path): (Response, Option<Message>, Option<String>) = async {
+                let proto = Request::parse(&mut buf).await?;
 
-                            if req.host != host {
-                                (
-                                    Response::GMAP(gmap::Response::INTERNAL_SERVER_ERROR),
-                                    None,
-                                    Some(req.path),
-                                )
-                            } else {
+                let result = match proto {
+                    Request::MisfinB(req) => misfin_handler(req, certs, memory).await,
+                    Request::MisfinC(req) => misfin_handler(req, certs, memory).await,
+                    Request::GMAP(req) => {
+                        let path = req.path.clone();
+
+                        (
+                            async move {
+                                let mut host = memory.base.host.clone();
+                                host.push_str(":1958");
+
+                                if req.host != host {
+                                    return Err(RequestError::InvalidRequest);
+                                }
+
                                 if let Some(cert) = certs.clone() {
-                                    match Cert::parse(&cert).await {
-                                        Ok(inner_cert) => match memory.mailbox(inner_cert) {
-                                            Ok(mailbox) => (
-                                                Response::GMAP(if req.path.starts_with("msgid/") {
-                                                    match mailbox
-                                                        .get(req.path.trim_start_matches("msgid/"))
-                                                    {
-                                                        Ok(res) => gmap::Response::SUCCESS((
-                                                            "text/plain".to_string(),
-                                                            res.message.into_bytes(),
-                                                        )),
-                                                        Err(err) => err.as_response().gmap,
-                                                    }
-                                                } else if req.path.starts_with("tag/") {
-                                                    let tag_raw =
-                                                        req.path.trim_start_matches("tag/");
-                                                    let tag = if tag_raw.len() > 0 {
-                                                        Some(tag_raw)
-                                                    } else {
-                                                        None
-                                                    };
+                                    let identity = Cert::parse(&cert).await?;
+                                    let mailbox = memory.mailbox(identity)?;
 
-                                                    match mailbox.list(tag) {
-                                                        Ok(res) => gmap::Response::SUCCESS((
-                                                            "text/plain".to_string(),
-                                                            res.join("\n").into_bytes(),
-                                                        )),
-                                                        Err(err) => err.as_response().gmap,
-                                                    }
-                                                } else {
-                                                    gmap::Response::NOT_FOUND
-                                                }),
-                                                None,
-                                                Some(req.path),
-                                            ),
-                                            Err(err) => (
-                                                Response::GMAP(err.as_response().gmap),
-                                                None,
-                                                Some(req.path),
-                                            ),
-                                        },
-                                        Err(err) => (
-                                            Response::GMAP(err.as_response().gmap),
-                                            None,
-                                            Some(req.path),
-                                        ),
-                                    }
+                                    let response = if req.path.starts_with("msgid/") {
+                                        mailbox
+                                            .get(req.path.trim_start_matches("msgid/"))?
+                                            .message
+                                            .into_bytes()
+                                    } else if req.path.starts_with("tag/") {
+                                        let tag_raw = req.path.trim_start_matches("tag/");
+
+                                        let tag = if tag_raw.len() > 0 {
+                                            Some(tag_raw)
+                                        } else {
+                                            None
+                                        };
+
+                                        mailbox.list(tag)?.join("\n").into_bytes()
+                                    } else {
+                                        return Err(RequestError::InvalidRequest);
+                                    };
+
+                                    return Ok::<gmap::Response, _>(gmap::Response::SUCCESS((
+                                        "text/plain".to_string(),
+                                        response,
+                                    )));
                                 } else {
-                                    (
-                                        Response::GMAP(gmap::Response::CERTIFICATE_REQUIERED),
-                                        None,
-                                        Some(req.path),
-                                    )
+                                    return Err(RequestError::CertificateRequired);
                                 }
                             }
-                        }
-                    },
-                    Err(err) => (Response::Misfin(err.as_response().misfin), None, None),
+                            .await
+                            .map_or_else(
+                                |e| Response::GMAP(e.as_response().gmap),
+                                |v| Response::GMAP(v),
+                            ),
+                            None,
+                            Some(path),
+                        )
+                    }
                 };
+
+                Ok::<_, RequestError>(result)
+            }
+            .await
+            .map_or_else(
+                |e| (Response::Misfin(e.as_response().misfin), None, None),
+                |v| v,
+            );
 
             match response.write(&mut buf).await {
                 Ok(_) => {
@@ -135,22 +127,19 @@ async fn misfin_handler(
     cert: Option<CertificateDer<'_>>,
     memory: Arc<Config>,
 ) -> (Response, Option<Message>, Option<String>) {
-    let out = match request
-        .as_message(cert, memory.base.store.join("trust/"))
-        .await
-    {
-        Ok(msg) => (
-            match memory.mailbox(msg.recipient.clone()) {
-                Ok(mbox) => match mbox.save(msg.clone()) {
-                    Ok(fingerprint) => misfin::Response::MESSAGE_DELIVERED(fingerprint),
-                    Err(err) => err.as_response().misfin,
-                },
-                Err(err) => err.as_response().misfin,
-            },
-            Some(msg),
-        ),
-        Err(err) => (err.as_response().misfin, None),
-    };
+    let out = async move {
+        let trust = memory.base.store.join("trust/");
+        let message = request
+            .as_message(cert, trust)
+            .await
+            .map_err(|_| RequestError::InvalidRequest)?;
+        let fingerprint = memory
+            .mailbox(message.recipient.clone())?
+            .save(message.clone())?;
+        Ok::<_, RequestError>((misfin::Response::MESSAGE_DELIVERED(fingerprint), message))
+    }
+    .await
+    .map_or_else(|e| (e.as_response().misfin, None), |v| (v.0, Some(v.1)));
 
     (Response::Misfin(out.0), out.1, None)
 }
