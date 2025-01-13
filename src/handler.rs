@@ -31,58 +31,7 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                 let result = match proto {
                     Request::MisfinB(req) => misfin_handler(req, certs, memory).await,
                     Request::MisfinC(req) => misfin_handler(req, certs, memory).await,
-                    Request::GMAP(req) => {
-                        let path = req.path.clone();
-
-                        (
-                            async move {
-                                let mut host = memory.base.host.clone();
-                                host.push_str(":1958");
-
-                                if req.host != host {
-                                    return Err(RequestError::InvalidRequest);
-                                }
-
-                                if let Some(cert) = certs.clone() {
-                                    let identity = Cert::parse(&cert).await?;
-                                    let mailbox = memory.mailbox(identity)?;
-
-                                    let response = if req.path.starts_with("msgid/") {
-                                        mailbox
-                                            .get(req.path.trim_start_matches("msgid/"))?
-                                            .message
-                                            .into_bytes()
-                                    } else if req.path.starts_with("tag/") {
-                                        let tag_raw = req.path.trim_start_matches("tag/");
-
-                                        let tag = if tag_raw.len() > 0 {
-                                            Some(tag_raw)
-                                        } else {
-                                            None
-                                        };
-
-                                        mailbox.list(tag)?.join("\n").into_bytes()
-                                    } else {
-                                        return Err(RequestError::InvalidRequest);
-                                    };
-
-                                    return Ok::<gmap::Response, _>(gmap::Response::SUCCESS((
-                                        "text/plain".to_string(),
-                                        response,
-                                    )));
-                                } else {
-                                    return Err(RequestError::CertificateRequired);
-                                }
-                            }
-                            .await
-                            .map_or_else(
-                                |e| Response::GMAP(e.as_response().gmap),
-                                |v| Response::GMAP(v),
-                            ),
-                            None,
-                            Some(path),
-                        )
-                    }
+                    Request::GMAP(req) => gmap_handler(req, certs, memory).await,
                 };
 
                 Ok::<_, RequestError>(result)
@@ -127,7 +76,7 @@ async fn misfin_handler(
     cert: Option<CertificateDer<'_>>,
     memory: Arc<Config>,
 ) -> (Response, Option<Message>, Option<String>) {
-    let out = async move {
+    async move {
         let trust = memory.base.store.join("trust/");
         let message = request
             .as_message(cert, trust)
@@ -139,7 +88,63 @@ async fn misfin_handler(
         Ok::<_, RequestError>((misfin::Response::MESSAGE_DELIVERED(fingerprint), message))
     }
     .await
-    .map_or_else(|e| (e.as_response().misfin, None), |v| (v.0, Some(v.1)));
+    .map_or_else(
+        |e| (Response::Misfin(e.as_response().misfin), None, None),
+        |v| (Response::Misfin(v.0), Some(v.1), None),
+    )
+}
 
-    (Response::Misfin(out.0), out.1, None)
+/// Handles GMAP requests
+async fn gmap_handler(
+    request: gmap::Request,
+    cert: Option<CertificateDer<'_>>,
+    memory: Arc<Config>,
+) -> (Response, Option<Message>, Option<String>) {
+    let path = request.path.clone();
+
+    (
+        async move {
+            let mut host = memory.base.host.clone();
+            host.push_str(":1958");
+
+            if request.host != host {
+                return Err(RequestError::InvalidRequest);
+            }
+
+            if let Some(cert) = cert.clone() {
+                let identity = Cert::parse(&cert).await?;
+                let mailbox = memory.mailbox(identity)?;
+
+                let response = if request.path.starts_with("msgid/") {
+                    mailbox
+                        .get(request.path.trim_start_matches("msgid/"))?
+                        .message
+                        .into_bytes()
+                } else if request.path.starts_with("tag/") {
+                    let tag_raw = request.path.trim_start_matches("tag/");
+
+                    let tag = if tag_raw.len() > 0 {
+                        Some(tag_raw)
+                    } else {
+                        None
+                    };
+
+                    mailbox.list(tag)?.join("\n").into_bytes()
+                } else {
+                    return Err(RequestError::NotFound);
+                };
+
+                return Ok::<(String, Vec<u8>), _>(("text/plain".to_string(), response));
+            } else {
+                return Err(RequestError::CertificateRequired);
+            }
+        }
+        .await
+        .map_or_else(
+            |e| Response::GMAP(e.as_response().gmap),
+            |v| Response::GMAP(gmap::Response::SUCCESS(v)),
+        ),
+        None,
+        Some(path),
+    )
 }

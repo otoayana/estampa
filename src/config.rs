@@ -104,7 +104,7 @@ impl Config {
         let mbox_conf = self
             .mailbox
             .get(&identity.mailbox)
-            .ok_or(RequestError::MailboxNotFound)?;
+            .ok_or(RequestError::NotFound)?;
 
         if !mbox_conf.enabled {
             return Err(RequestError::MailboxDisabled);

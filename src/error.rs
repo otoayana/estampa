@@ -45,8 +45,8 @@ pub enum RequestError {
     #[error("invalid request")]
     InvalidRequest,
 
-    #[error("mailbox not found")]
-    MailboxNotFound,
+    #[error("not found")]
+    NotFound,
 
     #[error("domain not serviced")]
     DomainNotServiced,
@@ -91,7 +91,7 @@ impl Responder for RequestError {
         UniversalResponse {
             misfin: match self {
                 Self::CertificateRequired => misfin::Response::CERTIFICATE_REQUIRED,
-                Self::MailboxNotFound => misfin::Response::MAILBOX_DOESNT_EXIST,
+                Self::NotFound => misfin::Response::MAILBOX_DOESNT_EXIST,
                 Self::DomainNotServiced => misfin::Response::DOMAIN_NOT_SERVICED,
                 Self::MailboxDisabled => misfin::Response::MAILBOX_GONE,
                 Self::BadMailboxCertificate => misfin::Response::PERMANENT_ERROR,
@@ -99,7 +99,10 @@ impl Responder for RequestError {
                 Self::IO(_) => misfin::Response::PERMANENT_ERROR,
                 Self::Verification(inner) => inner.as_response().misfin,
             },
-            gmap: gmap::Response::INTERNAL_SERVER_ERROR,
+            gmap: match self {
+                Self::NotFound => gmap::Response::NOT_FOUND,
+                _ => gmap::Response::INTERNAL_SERVER_ERROR,
+            },
         }
     }
 }
