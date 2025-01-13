@@ -70,6 +70,7 @@ impl Mailbox<'_> {
 
             let mut file = File::create(path)?;
             file.write_all(message.message.as_bytes())?;
+            self.tag(&id.to_string(), "Inbox")?;
         }
 
         // Certificate is read to respond with a fingerprint

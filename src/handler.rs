@@ -119,18 +119,6 @@ async fn gmap_handler(
                 return Err(RequestError::InvalidRequest);
             }
 
-            // Homepage
-            if request.path.len() == 0 {
-                return Ok((
-                    "text/gemini".to_string(),
-                    format!(
-                        "# misfin on {}\nwelcome! in order to access your messages, you'll need a GMAP client and an account. in case you're missing the latter, contact the server administrator, or host your own server!\n=> https://sr.ht/~nixgoat/estampa powered by estampa",
-                        memory.base.host.clone()
-                    )
-                    .into_bytes(),
-                ));
-            }
-
             if let Some(cert) = cert.clone() {
                 let identity = Cert::parse(&cert).await?;
                 let mailbox = memory.mailbox(identity)?;
@@ -150,11 +138,17 @@ async fn gmap_handler(
                         let date: Option<DateTime<Utc>>;
 
                         let filtered_tag = if let Some((tag, date_raw)) = metadata.split_once("/") {
-                            date = Some(DateTime::parse_from_rfc3339(date_raw).map_err(|_| RequestError::InvalidRequest)?.into());
+                            date = Some(
+                                DateTime::parse_from_rfc3339(date_raw)
+                                    .map_err(|_| RequestError::InvalidRequest)?
+                                    .into(),
+                            );
                             tag
                         } else {
                             // Tries to parse a date just in case there is not a tag present
-                            date = DateTime::parse_from_rfc3339(metadata).ok().map(|v| v.into());
+                            date = DateTime::parse_from_rfc3339(metadata)
+                                .ok()
+                                .map(|v| v.into());
 
                             if date.is_some() {
                                 ""
@@ -169,14 +163,16 @@ async fn gmap_handler(
                             None
                         };
 
-                        mailbox.list(tag,date)?.join(",").into_bytes()
+                        mailbox.list(tag, date)?.join(",").into_bytes()
                     }
                 } else if request.path.starts_with("untag/") {
-                    if let Some((tag, id)) = request.path.trim_start_matches("untag/").split_once("?") {
+                    if let Some((tag, id)) =
+                        request.path.trim_start_matches("untag/").split_once("?")
+                    {
                         mailbox.untag(id, tag)?;
                         "ok".as_bytes().to_vec()
                     } else {
-                        return Err(RequestError::InvalidRequest)
+                        return Err(RequestError::InvalidRequest);
                     }
                 } else if request.path.starts_with("delete?") {
                     mailbox.delete(request.path.trim_start_matches("delete?"))?;
