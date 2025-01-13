@@ -5,6 +5,7 @@ use crate::{
     protocol::{gmap, misfin, AsMessage, Request, Response},
     tls::Cert,
 };
+use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::{
     io::{AsyncWriteExt, BufStream},
@@ -118,6 +119,18 @@ async fn gmap_handler(
                 return Err(RequestError::InvalidRequest);
             }
 
+            // Homepage
+            if request.path.len() == 0 {
+                return Ok((
+                    "text/gemini".to_string(),
+                    format!(
+                        "# misfin on {}\nwelcome! in order to access your messages, you'll need a GMAP client and an account. in case you're missing the latter, contact the server administrator, or host your own server!\n=> https://sr.ht/~nixgoat/estampa powered by estampa",
+                        memory.base.host.clone()
+                    )
+                    .into_bytes(),
+                ));
+            }
+
             if let Some(cert) = cert.clone() {
                 let identity = Cert::parse(&cert).await?;
                 let mailbox = memory.mailbox(identity)?;
@@ -130,13 +143,44 @@ async fn gmap_handler(
                 } else if request.path.starts_with("tag/") {
                     let metadata = request.path.trim_start_matches("tag/");
 
-                    let tag = if metadata.len() > 0 {
-                        Some(metadata)
+                    if let Some((tag, msgid)) = metadata.split_once("?") {
+                        mailbox.tag(msgid, tag)?;
+                        "ok".as_bytes().to_vec()
                     } else {
-                        None
-                    };
+                        let date: Option<DateTime<Utc>>;
 
-                    mailbox.list(tag)?.join("\n").into_bytes()
+                        let filtered_tag = if let Some((tag, date_raw)) = metadata.split_once("/") {
+                            date = Some(DateTime::parse_from_rfc3339(date_raw).map_err(|_| RequestError::InvalidRequest)?.into());
+                            tag
+                        } else {
+                            // Tries to parse a date just in case there is not a tag present
+                            date = DateTime::parse_from_rfc3339(metadata).ok().map(|v| v.into());
+
+                            if date.is_some() {
+                                ""
+                            } else {
+                                metadata
+                            }
+                        };
+
+                        let tag = if filtered_tag.len() > 0 {
+                            Some(filtered_tag)
+                        } else {
+                            None
+                        };
+
+                        mailbox.list(tag,date)?.join(",").into_bytes()
+                    }
+                } else if request.path.starts_with("untag/") {
+                    if let Some((tag, id)) = request.path.trim_start_matches("untag/").split_once("?") {
+                        mailbox.untag(id, tag)?;
+                        "ok".as_bytes().to_vec()
+                    } else {
+                        return Err(RequestError::InvalidRequest)
+                    }
+                } else if request.path.starts_with("delete?") {
+                    mailbox.delete(request.path.trim_start_matches("delete?"))?;
+                    "ok".as_bytes().to_vec()
                 } else {
                     return Err(RequestError::NotFound);
                 };

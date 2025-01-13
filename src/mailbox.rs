@@ -1,4 +1,5 @@
 use crate::error::RequestError;
+use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -62,6 +63,7 @@ impl Mailbox<'_> {
                     .into_bytes()
                     .as_slice(),
             );
+
             debug!("message id: {}", id.to_string());
 
             let path = self.path.clone().join(format!("{}.msfn", id.to_string()));
@@ -123,8 +125,14 @@ impl Mailbox<'_> {
     }
 
     /// Lists either all messages, or messages contained in a tag
-    pub fn list<'a>(&self, tag: Option<&'a str>) -> Result<Vec<String>, RequestError> {
-        let messages = if let Some(tag) = tag {
+    pub fn list<'a>(
+        &self,
+        tag: Option<&'a str>,
+        date: Option<DateTime<Utc>>,
+    ) -> Result<Vec<String>, RequestError> {
+        let files = fs::read_dir(self.path.clone())?.flatten();
+
+        let mut messages = if let Some(tag) = tag {
             // Handles listing messages contained in a tag
             if !self.tags.contains(&tag) {
                 // TODO: create custom error for missing tag
@@ -145,7 +153,6 @@ impl Mailbox<'_> {
                 .collect::<Vec<String>>()
         } else {
             // Handles listing all messages
-            let files = fs::read_dir(self.path.clone())?.flatten();
             let mut file_list: Vec<String> = vec![];
 
             for file in files {
@@ -163,20 +170,70 @@ impl Mailbox<'_> {
             file_list
         };
 
+        // Filters message IDs by date, removing them accordingly from the existing message list
+        if let Some(max_date) = date {
+            debug!("{:?}", max_date);
+            for msgid in messages.clone() {
+                let mut file_name = msgid.clone();
+                file_name.push_str(".msfn");
+
+                let file_path = self.path.clone().join(file_name);
+
+                let created: DateTime<Utc> = fs::metadata(file_path)?.created()?.into();
+                if max_date > created {
+                    if let Some(pos) = messages.iter().position(|m| *m == msgid) {
+                        messages.remove(pos);
+                    }
+                }
+            }
+        }
+
         Ok(messages)
     }
 
     /// Toggles a tag for a message
-    #[allow(dead_code)]
     pub fn tag<'a>(&self, id: &'a str, tag: &'a str) -> Result<(), RequestError> {
         if !self.tags.contains(&tag) {
             // TODO: create custom error for missing tag
             return Err(RequestError::InvalidRequest);
         }
 
-        if !self.path.join(format!("{}.msfn", tag)).exists() {
-            // TODO: create custom error for missing message
+        if !self.path.join(format!("{}.msfn", id)).exists() {
+            return Err(RequestError::NotFound);
+        }
+
+        // Reads tag to inspect if the ID is present in it
+        let tag_path = self.path.join(format!(".{}", tag));
+        let mut tag_contents = String::new();
+
+        if tag_path.exists() {
+            let mut tag_file = File::open(tag_path.clone())?;
+            tag_file.read_to_string(&mut tag_contents)?;
+        }
+
+        let mut common_tag_opts = OpenOptions::new();
+        common_tag_opts.write(true).create(true);
+
+        if !tag_contents.contains(id) {
+            // Add message ID to tag
+            let mut tag_mod = common_tag_opts
+                .clone()
+                .append(true)
+                .open(tag_path.clone())?;
+            tag_mod.write_all(id.as_bytes())?;
+        }
+
+        Ok(())
+    }
+
+    pub fn untag<'a>(&self, id: &'a str, tag: &'a str) -> Result<(), RequestError> {
+        if !self.tags.contains(&tag) {
+            // TODO: create custom error for missing tag
             return Err(RequestError::InvalidRequest);
+        }
+
+        if !self.path.join(format!("{}.msfn", tag)).exists() {
+            return Err(RequestError::NotFound);
         }
 
         // Reads tag to inspect if the ID is present in it
@@ -203,28 +260,21 @@ impl Mailbox<'_> {
                     .as_bytes(),
             )?;
         } else {
-            // Add message ID to tag
-            let mut tag_mod = common_tag_opts
-                .clone()
-                .append(true)
-                .open(tag_path.clone())?;
-            tag_mod.write_all(id.as_bytes())?;
+            return Err(RequestError::NotFound);
         }
 
         Ok(())
     }
 
     /// Deletes a message if it's present in the Trash tag
-    #[allow(dead_code)]
     pub fn delete<'a>(&self, id: &'a str) -> Result<(), RequestError> {
-        let messages = self.list(Some("Trash"))?;
+        let messages = self.list(Some("Trash"), None)?;
 
         if messages.contains(&id.to_string()) {
             self.tag(id, "Trash")?;
             fs::remove_file(self.path.join(format!("{}.msfn", id)))?;
         } else {
-            // TODO: create error for missing message
-            return Err(RequestError::InvalidRequest);
+            return Err(RequestError::NotFound);
         }
 
         Ok(())
