@@ -13,6 +13,12 @@ use tokio::{
 use tokio_rustls::{rustls::pki_types::CertificateDer, TlsAcceptor};
 use tracing::{debug, error, info, warn};
 
+#[derive(Debug)]
+enum Context {
+    Message(Message),
+    Path(String),
+}
+
 /// Reads requests and writes responses to an open TLS stream
 pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<Config>) {
     match acceptor.accept(&mut socket).await {
@@ -25,7 +31,7 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
 
             let mut buf = BufStream::new(stream);
 
-            let (response, message, path): (Response, Option<Message>, Option<String>) = async {
+            let (response, context): (Response, Option<Context>) = async {
                 let proto = Request::parse(&mut buf).await?;
 
                 let result = match proto {
@@ -37,16 +43,13 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                 Ok::<_, RequestError>(result)
             }
             .await
-            .map_or_else(
-                |e| (Response::Misfin(e.as_response().misfin), None, None),
-                |v| v,
-            );
+            .map_or_else(|e| (Response::Misfin(e.as_response().misfin), None), |v| v);
 
             match response.write(&mut buf).await {
                 Ok(_) => {
                     debug!("response sent ({response})");
                     if matches!(response, Response::Misfin(_)) {
-                        if let Some(inner) = message {
+                        if let Some(Context::Message(inner)) = context {
                             info!("message received ({} -> {})", inner.sender, inner.recipient)
                         } else {
                             warn!("message received, but contents unavailable")
@@ -55,7 +58,11 @@ pub async fn handler(mut socket: TcpStream, acceptor: TlsAcceptor, memory: Arc<C
                         info!(
                             "gmap response sent ({}, /{})",
                             status,
-                            path.unwrap_or(String::new())
+                            if let Some(Context::Path(path)) = context {
+                                path
+                            } else {
+                                String::new()
+                            }
                         )
                     }
                 }
@@ -75,7 +82,7 @@ async fn misfin_handler(
     request: impl AsMessage,
     cert: Option<CertificateDer<'_>>,
     memory: Arc<Config>,
-) -> (Response, Option<Message>, Option<String>) {
+) -> (Response, Option<Context>) {
     async move {
         let trust = memory.base.store.join("trust/");
         let message = request
@@ -89,8 +96,8 @@ async fn misfin_handler(
     }
     .await
     .map_or_else(
-        |e| (Response::Misfin(e.as_response().misfin), None, None),
-        |v| (Response::Misfin(v.0), Some(v.1), None),
+        |e| (Response::Misfin(e.as_response().misfin), None),
+        |v| (Response::Misfin(v.0), Some(Context::Message(v.1))),
     )
 }
 
@@ -99,7 +106,7 @@ async fn gmap_handler(
     request: gmap::Request,
     cert: Option<CertificateDer<'_>>,
     memory: Arc<Config>,
-) -> (Response, Option<Message>, Option<String>) {
+) -> (Response, Option<Context>) {
     let path = request.path.clone();
 
     (
@@ -121,10 +128,10 @@ async fn gmap_handler(
                         .message
                         .into_bytes()
                 } else if request.path.starts_with("tag/") {
-                    let tag_raw = request.path.trim_start_matches("tag/");
+                    let metadata = request.path.trim_start_matches("tag/");
 
-                    let tag = if tag_raw.len() > 0 {
-                        Some(tag_raw)
+                    let tag = if metadata.len() > 0 {
+                        Some(metadata)
                     } else {
                         None
                     };
@@ -144,7 +151,6 @@ async fn gmap_handler(
             |e| Response::GMAP(e.as_response().gmap),
             |v| Response::GMAP(gmap::Response::SUCCESS(v)),
         ),
-        None,
-        Some(path),
+        Some(Context::Path(path)),
     )
 }
