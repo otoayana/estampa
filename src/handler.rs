@@ -90,9 +90,14 @@ async fn misfin_handler(
             .as_message(cert, trust)
             .await
             .map_err(|_| RequestError::InvalidRequest)?;
-        let fingerprint = memory
-            .mailbox(message.recipient.clone())?
-            .save(message.clone())?;
+
+        let fingerprint = if message.recipient.mailbox == "gmap".to_string() {
+            memory.mailbox(message.sender.clone())
+        } else {
+            memory.mailbox(message.recipient.clone())
+        }?
+        .save(message.clone())?;
+
         Ok::<_, RequestError>((misfin::Response::MESSAGE_DELIVERED(fingerprint), message))
     }
     .await

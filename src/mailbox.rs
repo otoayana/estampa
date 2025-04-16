@@ -10,7 +10,7 @@ use std::{
 };
 use tracing::{debug, error};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Identity {
     pub mailbox: String,
     pub hostname: String,
@@ -51,26 +51,71 @@ impl Mailbox<'_> {
     /// Saves provided message into the mailbox
     pub fn save(&self, message: Message) -> Result<String, RequestError> {
         if !message.message.trim().is_empty() {
-            let now = SystemTime::now();
-            let time = now
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or(Duration::new(0, 0))
-                .as_millis();
+            // Creates a BLAKE3 hash for the message ID, or fetches MGID in case of GMAP message
+            let id = {
+                if message.message.starts_with("MGID:") {
+                    let raw_message = message.message.clone();
+                    let id = raw_message
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .trim_start_matches("MGID:")
+                        .trim()
+                        .to_string();
 
-            // Creates a BLAKE3 hash for the message ID
-            let id = blake3::hash(
-                format!("{}{}", time, message.sender)
-                    .into_bytes()
-                    .as_slice(),
-            );
+                    id
+                } else {
+                    let now = SystemTime::now();
+                    let time = now
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or(Duration::new(0, 0))
+                        .as_millis();
+                    blake3::hash(
+                        format!("{}{}", time, message.sender)
+                            .into_bytes()
+                            .as_slice(),
+                    )
+                    .to_string()
+                }
+            };
 
             debug!("message id: {}", id.to_string());
 
             let path = self.path.clone().join(format!("{}.msfn", id.to_string()));
 
-            let mut file = File::create(path)?;
-            file.write_all(message.message.as_bytes())?;
-            self.tag(&id.to_string(), "Inbox")?;
+            // Checks if message is a GMAP tag request.
+            // If saved message matches the one received, the message is marked as sent.
+            if path.exists() && message.sender == self.owner && message.recipient.mailbox == "gmap"
+            {
+                let msg = message
+                    .message
+                    .clone()
+                    .lines()
+                    .skip(1)
+                    .map(|l| l.to_string())
+                    .collect::<Vec<String>>()
+                    .join("\n");
+
+                let mut file = File::open(path)?;
+                let mut buf = String::new();
+                file.read_to_string(&mut buf)?;
+
+                if msg == buf {
+                    self.untag(&id.to_string(), "Drafts")?;
+                    self.tag(&id.to_string(), "Sent")?;
+                }
+            } else {
+                let mut file = File::create(path)?;
+                file.write_all(message.message.as_bytes())?;
+                self.tag(
+                    &id.to_string(),
+                    if message.sender == self.owner && message.recipient.mailbox == "gmap" {
+                        "Drafts"
+                    } else {
+                        "Inbox"
+                    },
+                )?;
+            }
         }
 
         // Certificate is read to respond with a fingerprint
