@@ -7,40 +7,40 @@ authors = ["Lux Aliaga <me@lux.rip>"]
 license = "AGPL-3.0-or-later"
 
 [dependencies]
-blake3 = "1.5"
-chrono = "0.4"
-pem = "3.0"
-rustls-pemfile = "2.1"
-sha2 = "0.10"
-thiserror = "1.0"
-time = "0.3"
-tokio-rustls = "0.26"
-toml = "0.8"
-tracing = "0.1"
-tracing-subscriber = "0.3"
+blake3 = "1.8.2"
+chrono = "0.4.42"
+pem = "3.0.5"
+rustls-pemfile = "2.2.0"
+sha2 = "0.10.9"
+thiserror = "2.0.16"
+time = "0.3.43"
+tokio-rustls = "0.26.2"
+toml = "0.9.5"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.20"
 
 [dependencies.clap]
-version = "4.5"
+version = "4.5.47"
 features = ["derive"]
 
 [dependencies.rcgen]
-version = "0.13"
+version = "0.14.4"
 features = ["pem", "crypto", "x509-parser", "aws_lc_rs"]
 
 [dependencies.serde]
-version = "1.0"
+version = "1.0.219"
 features = ["derive"]
 
 [dependencies.tokio]
-version = "1.40"
+version = "1.47.1"
 features = ["fs", "io-util", "macros", "net", "rt-multi-thread"]
 
 [dependencies.x509-parser]
-version = "0.16"
+version = "0.18"
 features = ["verify"]
 
 [dev-dependencies]
-tempfile = "3.13"
+tempfile = "3.22"
 
 [profile.release]
 strip = true

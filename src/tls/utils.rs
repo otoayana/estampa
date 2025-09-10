@@ -4,7 +4,7 @@ use crate::{
     mailbox::Identity,
     tls::auth::EstampaServerAuth,
 };
-use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
+use rcgen::{CertificateParams, DistinguishedName, DnType, Issuer, KeyPair};
 use std::{
     io::Read,
     path::{Path, PathBuf},
@@ -85,7 +85,7 @@ impl Cert {
             .await?;
 
         let root_sig = KeyPair::from_pem(&key_pem)?;
-        let parent_cert = CertificateParams::from_ca_cert_pem(&cert_pem)?.self_signed(&root_sig)?;
+        let parent_cert = Issuer::from_ca_cert_pem(&cert_pem, root_sig)?;
 
         let mut params = CertificateParams::new(vec![host.to_string()])?;
         let mut dn = DistinguishedName::new();
@@ -102,7 +102,7 @@ impl Cert {
         params.not_after = now.replace_year(now.year() + 5)?;
 
         let key = KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256)?;
-        let cert = params.signed_by(&key, &parent_cert, &root_sig)?;
+        let cert = params.signed_by(&key, &parent_cert)?;
 
         File::create(&store.join(format!("certs/{}.pem", &mailbox.0)))
             .await?
